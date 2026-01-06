@@ -1,0 +1,14 @@
+# Core dependencies
+rich>=10.0.0        # MIT, python >=3.8.0
+
+# Optional dependencies for extended features
+# Uncomment as needed:
+
+# For configuration logging
+# omegaconf>=2.0.0      # BSD, python >=3.6.0
+
+# For PyTorch model summaries
+# torchinfo>=1.0.0       # MIT, python >=3.7.0
+
+# For distributed training
+# accelerate>=0.20.0      # Apache, python >=3.10.0

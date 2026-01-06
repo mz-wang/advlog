@@ -1,4 +1,4 @@
-# adv-log
+# advlog-core
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
@@ -23,14 +23,16 @@ A powerful, feature-rich logging library for Python with beautiful terminal outp
 Install from PyPI:
 
 ```bash
-pip install adv-log
+pip install advlog-core
 ```
 
 Install with all optional features:
 
 ```bash
-pip install "adv-log[all]"
+pip install "advlog-core[all]"
 ```
+
+> **Note:** The PyPI package name is `advlog-core`, but when importing in Python, use `import advlog`.
 
 ## 🚀 Quick Start
 
@@ -176,7 +178,7 @@ trainer.log_train_step(
 This project is built to be lightweight. While the core functionality requires minimal setup, certain features are enabled only when optional dependencies are installed.
 
 ### Required
-These are necessary for the basic operation of adv-log:
+These are necessary for the basic operation of advlog-core:
 
 - **Rich** (MIT License): Used for beautiful terminal formatting and logging.
 
@@ -192,21 +194,21 @@ Install these based on your specific use case:
 You can install the core package with:
 
 ```bash
-pip install adv-log
+pip install advlog-core
 ```
 
 To include all optional features, you can use the extra tag:
 
 ```bash
-pip install "adv-log[all]"
+pip install "advlog-core[all]"
 ```
 
 Or install specific optional dependencies:
 
 ```bash
-pip install "adv-log[config]"      # For OmegaConf support
-pip install "adv-log[torch]"       # For torchinfo support
-pip install "adv-log[distributed]" # For Accelerate support
+pip install "advlog-core[config]"      # For OmegaConf support
+pip install "advlog-core[torch]"       # For torchinfo support
+pip install "advlog-core[distributed]" # For Accelerate support
 ```
 
 ## 📖 Documentation
