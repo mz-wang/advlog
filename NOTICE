@@ -1,0 +1,34 @@
+advlog-core
+Copyright 2026 Mengzhao Wang
+
+This product includes software developed at
+https://github.com/mz-wang/advlog
+
+========================================================================
+External Dependencies Notice
+========================================================================
+
+The following components are NOT distributed as part of this package, 
+but are required or optional dependencies that the user must provide 
+separately. These are listed here for informational purposes regarding 
+compatibility and licensing:
+
+1. Rich (Required)
+   - License: MIT
+   - Copyright (c) 2020 Will McGugan
+   - Source: https://github.com/Textualize/rich
+
+2. OmegaConf (Optional)
+   - License: BSD-3-Clause
+   - Copyright (c) Facebook, Inc. and its affiliates.
+   - Source: https://github.com/omry/omegaconf
+
+3. torchinfo (Optional)
+   - License: MIT
+   - Copyright (c) 2020 Tyler Yep
+   - Source: https://github.com/TylerYep/torchinfo
+
+4. Accelerate (Optional)
+   - License: Apache-2.0
+   - Copyright 2021- Hugging Face Inc.
+   - Source: https://github.com/huggingface/accelerate

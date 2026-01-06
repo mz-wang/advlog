@@ -1,0 +1,17 @@
+repos:
+  # --- 1. Copyright header check (automatically modifies files before commit) ---
+  - repo: https://github.com/google/addlicense
+    rev: v1.2.0
+    hooks:
+      - id: addlicense
+        # For Python projects, use Apache license and specify copyright holder
+        args: ["-v", "-c", "Mengzhao Wang", "-y", "2026", "-l", "apache"]
+        types_or: [python] # Only process Python files
+
+  # --- 2. Commit message convention check (runs after message input) ---
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.11.0
+    hooks:
+      - id: commitizen # Checks that your message follows conventional commits like 'feat: xxx'
+      - id: commitizen-branch # Ensures current branch follows rules (usually checked before push)
+        stages: [pre-push]
