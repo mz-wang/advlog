@@ -16,7 +16,6 @@
 
 import logging
 from logging.handlers import RotatingFileHandler as StdRotatingFileHandler
-from typing import Optional
 
 from advlog.utils.path import ensure_dir
 
@@ -61,7 +60,7 @@ class FileHandler:
             Configured file handler
         """
         # Lazy import formatters to avoid circular imports
-        from advlog.core.formatter import IndentedFormatter, JSONFormatter, PlainFormatter, AlignedFormatter
+        from advlog.core.formatter import AlignedFormatter, IndentedFormatter, JSONFormatter, PlainFormatter
 
         # Create directory if it doesn't exist
         if log_file:
@@ -139,7 +138,7 @@ class RotatingFileHandler:
             Configured rotating file handler
         """
         # Lazy import formatters to avoid circular imports
-        from advlog.core.formatter import IndentedFormatter, PlainFormatter, AlignedFormatter
+        from advlog.core.formatter import AlignedFormatter, IndentedFormatter, PlainFormatter
 
         # Create directory if it doesn't exist
         ensure_dir(log_file)
@@ -175,7 +174,7 @@ class RotatingFileHandler:
 
 
 def create_file_handler(
-    log_file: str, mode: str = "w", max_file_size: Optional[int] = None, backup_count: int = 5, **kwargs
+    log_file: str, mode: str = "w", max_file_size: int | None = None, backup_count: int = 5, **kwargs
 ) -> logging.Handler:
     """Convenience function to create a file handler.
 

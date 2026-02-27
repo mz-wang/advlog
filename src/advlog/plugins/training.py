@@ -17,7 +17,7 @@
 import csv
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from advlog.utils.path import ensure_dir
 
@@ -29,7 +29,7 @@ except ImportError:
     OMEGACONF_AVAILABLE = False
 
 try:
-    from torchinfo import summary
+    from torchinfo import summary  # type: ignore
 
     TORCHINFO_AVAILABLE = True
 except ImportError:
@@ -89,7 +89,7 @@ class TrainingLogger:
 
         self.logger.info("=" * (len(title) + 12))
 
-    def _log_dict_config(self, config: Dict[str, Any], indent: int = 0):
+    def _log_dict_config(self, config: dict[str, Any], indent: int = 0):
         """Log a dictionary configuration recursively.
 
         Args:
@@ -117,7 +117,7 @@ class TrainingLogger:
             self.logger.info(str(config))
 
     def log_model_summary(
-        self, model: Any, input_size: tuple, module_name: Optional[str] = None, depth: int = 3, verbose: int = 0
+        self, model: Any, input_size: tuple, module_name: str | None = None, depth: int = 3, verbose: int = 0
     ):
         """Log model architecture summary.
 
@@ -157,10 +157,10 @@ class TrainingLogger:
         total_epochs: int,
         batch: int,
         total_batches: int,
-        loss_dict: Dict[str, float],
+        loss_dict: dict[str, float],
         time_elapsed: float,
-        csv_path: Optional[str] = None,
-        additional_metrics: Optional[Dict[str, Any]] = None,
+        csv_path: str | None = None,
+        additional_metrics: dict[str, Any] | None = None,
     ):
         """Log training step information.
 
@@ -207,8 +207,8 @@ class TrainingLogger:
         csv_path: str,
         epoch: int,
         batch: int,
-        loss_dict: Dict[str, float],
-        additional_metrics: Optional[Dict[str, Any]] = None,
+        loss_dict: dict[str, float],
+        additional_metrics: dict[str, Any] | None = None,
     ):
         """Log metrics to CSV file.
 
@@ -246,7 +246,7 @@ class TrainingLogger:
             self.logger.error(f"Failed to write to CSV file {csv_path}: {e}")
 
     def log_evaluation_results(
-        self, metrics: Dict[str, float], epoch: Optional[int] = None, title: str = "Evaluation Results"
+        self, metrics: dict[str, float], epoch: int | None = None, title: str = "Evaluation Results"
     ):
         """Log evaluation metrics.
 

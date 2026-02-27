@@ -16,7 +16,6 @@
 
 import os
 from datetime import datetime
-from typing import Optional
 
 from .path import ensure_dir
 
@@ -44,7 +43,7 @@ class LogNamingStrategy:
     @staticmethod
     def timestamped(
         name: str,
-        suffix: Optional[str] = None,
+        suffix: str | None = None,
         directory: str = "logs",
         timestamp_format: str = "%Y%m%d_%H%M%S",
         extension: str = ".log",
@@ -88,7 +87,7 @@ class LogNamingStrategy:
     @staticmethod
     def daily(
         name: str,
-        suffix: Optional[str] = None,
+        suffix: str | None = None,
         base_directory: str = "logs",
         date_format: str = "%Y-%m-%d",
         extension: str = ".log",
@@ -124,7 +123,7 @@ class LogNamingStrategy:
     @staticmethod
     def hourly(
         name: str,
-        suffix: Optional[str] = None,
+        suffix: str | None = None,
         base_directory: str = "logs",
         datetime_format: str = "%Y-%m-%d/%H",
         extension: str = ".log",
@@ -160,7 +159,7 @@ class LogNamingStrategy:
     @staticmethod
     def incremental(
         name: str,
-        suffix: Optional[str] = None,
+        suffix: str | None = None,
         directory: str = "logs",
         extension: str = ".log",
         max_attempts: int = 1000,
@@ -208,8 +207,8 @@ class LogNamingStrategy:
     @staticmethod
     def session_based(
         name: str,
-        session_id: Optional[str] = None,
-        suffix: Optional[str] = None,
+        session_id: str | None = None,
+        suffix: str | None = None,
         directory: str = "logs",
         extension: str = ".log",
     ) -> str:
@@ -243,7 +242,7 @@ class LogNamingStrategy:
         return os.path.join(directory, filename)
 
 
-def get_timestamped_name(name: str, suffix: Optional[str] = None, strategy: str = "timestamped") -> str:
+def get_timestamped_name(name: str, suffix: str | None = None, strategy: str = "timestamped") -> str:
     """Convenience function to get a timestamped log file name.
 
     Args:

@@ -44,7 +44,7 @@ def example1_basic_progress_with_logging():
         console_output=False,  # Disable default console output
         use_color=True,
     )
-    logger = AdvancedLogger(config).get_logger()
+    AdvancedLogger(config)
 
     # Create progress bar
     progress = ProgressTracker()
@@ -189,7 +189,7 @@ def example5_logger_integration():
     print("Example 5: Progress Bar + LoggerManager Integration")
     print("=" * 70)
 
-    from core import LoggerManager
+    from advlog.core import LoggerManager
 
     # Note: Don't use shared_console to avoid conflicts with Progress
     manager = LoggerManager(shared_console=False)

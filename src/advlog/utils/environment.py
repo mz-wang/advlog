@@ -16,10 +16,10 @@
 
 import os
 import sys
-from typing import Any, Dict
+from typing import Any
 
 
-def detect_environment() -> Dict[str, Any]:
+def detect_environment() -> dict[str, Any]:
     """Detect the current runtime environment.
 
     Returns:
@@ -46,7 +46,7 @@ def _is_jupyter() -> bool:
     """Check if running in Jupyter/IPython environment."""
     try:
         # Check for IPython
-        from IPython import get_ipython
+        from IPython import get_ipython  # type: ignore
 
         ipython = get_ipython()
         if ipython is None:

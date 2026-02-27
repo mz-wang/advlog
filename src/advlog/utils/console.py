@@ -13,10 +13,13 @@
 # limitations under the License.
 
 """Shared Console utility for advlog."""
-from rich.console import Console
+
 import sys
 
+from rich.console import Console
+
 _shared_console = None
+
 
 def get_shared_console() -> Console:
     """Get or create a shared Console instance.

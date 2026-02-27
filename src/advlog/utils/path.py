@@ -13,7 +13,9 @@
 # limitations under the License.
 
 """Path utility functions for advlog."""
+
 import os
+
 
 def ensure_dir(path: str) -> None:
     """Ensure the directory exists for the given file path.

@@ -58,7 +58,7 @@ Modules:
     handlers: File and console handlers
     plugins: Progress tracking and training utilities
     utils: Environment detection and helper utilities
-    setup: Global logging management (initialize, get_logger, get_progress)
+    api: Global logging management (initialize, get_logger, get_progress)
 """
 
 __version__ = "0.1.0"
@@ -102,7 +102,7 @@ except ImportError:
 
 # Utility imports
 # Global management API (replaces old get_logger)
-from .setup import (
+from .api import (
     get_logger,
     get_progress,
     initialize,

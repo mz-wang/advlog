@@ -42,7 +42,7 @@ def test_correct_breakpoint_continue():
     log_file_path = "./logs/breakpoint_test.log"
     print(f"Step 1: Creating log file: {log_file_path}")
     initialize(
-        log_file=log_file_path,  # Specify exact file path
+        log_file_path=log_file_path,  # Specify exact file path
         file_mode="w",  # Overwrite to create new file
     )
     log = get_logger(__name__)
@@ -60,7 +60,7 @@ def test_correct_breakpoint_continue():
     # Step 2: Continue to the SAME file
     print("Step 2: Continuing to the same file (breakpoint continue)")
     initialize(
-        log_file=log_file_path,  # SAME file path
+        log_file_path=log_file_path,  # SAME file path
         file_mode="a",  # Append mode
     )
     log = get_logger(__name__)

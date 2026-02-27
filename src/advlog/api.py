@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-Global logging setup module.
+Global logging API module.
 
 Provides singleton-based global logging management for easy cross-module usage.
 This module simplifies external project integration by providing a simple API
@@ -31,26 +31,21 @@ Usage:
     log = get_logger(__name__)
     progress = get_progress()
 """
+
+import importlib.util
 import logging
 import os
 import sys
-from typing import Optional
 
 from advlog.core import LoggerManager
 from advlog.plugins import ProgressTracker
 from advlog.utils import LogNamingStrategy
 
-# Try to import Rich for console detection
-try:
-    from rich.console import Console
-
-    RICH_AVAILABLE = True
-except ImportError:
-    RICH_AVAILABLE = False
+RICH_AVAILABLE = importlib.util.find_spec("rich") is not None
 
 # Global singleton instances
-_LOGGER_MANAGER: Optional[LoggerManager] = None
-_PROGRESS_TRACKER: Optional[ProgressTracker] = None
+_LOGGER_MANAGER: LoggerManager | None = None
+_PROGRESS_TRACKER: ProgressTracker | None = None
 _INITIALIZED: bool = False
 _INIT_CONFIG: dict = {}
 
@@ -67,13 +62,15 @@ def _should_force_terminal_width() -> bool:
 
 def initialize(
     output_dir: str = "./logs",
+    use_date_dir: bool = True,
     session_name: str = "app",
+    suffix: str | None = None,
     log_level: str = "INFO",
     use_color: bool = True,
     enable_file_logging: bool = True,
     show_location: bool = False,
     file_mode: str = "a",
-    log_file: Optional[str] = None,
+    log_file_path: str | None = None,
 ) -> LoggerManager:
     """
     Initialize the global logging system.
@@ -82,8 +79,10 @@ def initialize(
     get_logger() will auto-initialize with default settings.
 
     Args:
-        output_dir: Directory for log files
-        session_name: Name prefix for log files (ignored if log_file is provided)
+        output_dir: Directory for log files. Ignored if log_file_path is provided.
+        use_date_dir: Whether to create a subdirectory with the current date (YYYY-MM-DD).
+        session_name: Name prefix for log files. Ignored if log_file_path is provided.
+        suffix: Optional suffix to append to the log filename. Ignored if log_file_path is provided.
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         use_color: Enable colored console output
         enable_file_logging: Enable file logging
@@ -91,8 +90,9 @@ def initialize(
         file_mode: File opening mode ('w' for overwrite, 'a' for append/continue)
                    Default is 'a' (append), which allows breakpoint continue.
                    If file doesn't exist, it will be created automatically.
-        log_file: Specific log file path. If provided, overrides session_name-based naming.
-                  This is essential for breakpoint continue - specify the exact file to append to.
+        log_file_path: Specific log file path. If provided, it will COMPLETELY OVERRIDE
+                       output_dir, session_name and suffix related naming logic.
+                       This is essential for breakpoint continue - specify the exact file to append to.
 
     Returns:
         LoggerManager instance
@@ -108,7 +108,7 @@ def initialize(
         ... )
         >>> # Breakpoint continue (specify exact file to append to)
         >>> manager = initialize(
-        ...     log_file="./logs/reconstruction.log",  # Target specific file
+        ...     log_file_path="./logs/reconstruction.log",  # Target specific file
         ...     file_mode="a"  # Append to this file
         ... )
         >>> # Force overwrite mode
@@ -118,9 +118,6 @@ def initialize(
         ... )
     """
     global _LOGGER_MANAGER, _INITIALIZED, _INIT_CONFIG
-
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
 
     # Convert log level string to logging constant
     level_map = {
@@ -135,15 +132,23 @@ def initialize(
     # Create main log file path if file logging is enabled
     shared_file = None
     if enable_file_logging:
-        if log_file:
+        if log_file_path:
             # Use the specified log file path (for breakpoint continue)
-            shared_file = log_file
+            # This COMPLETELY overrides output_dir and session_name
+            shared_file = log_file_path
             # Ensure the directory exists
-            os.makedirs(os.path.dirname(shared_file), exist_ok=True)
+            log_dir = os.path.dirname(os.path.abspath(shared_file))
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
         else:
+            # Create output directory
+            os.makedirs(output_dir, exist_ok=True)
+
             # Auto-generate filename with timestamp
-            log_filename = LogNamingStrategy.timestamped(session_name)
-            shared_file = os.path.join(output_dir, log_filename)
+            # Pass directory and suffix to the naming strategy
+            shared_file = LogNamingStrategy.timestamped(
+                name=session_name, suffix=suffix, directory=output_dir, use_date_dir=use_date_dir
+            )
             # Ensure the date directory exists
             os.makedirs(os.path.dirname(shared_file), exist_ok=True)
 
@@ -162,19 +167,20 @@ def initialize(
     _INIT_CONFIG = {
         "output_dir": output_dir,
         "session_name": session_name,
+        "suffix": suffix,
         "log_level": log_level,
         "use_color": use_color,
         "enable_file_logging": enable_file_logging,
         "show_location": show_location,
         "file_mode": file_mode,
-        "log_file": log_file,
+        "log_file_path": log_file_path,
     }
 
     _INITIALIZED = True
     return _LOGGER_MANAGER
 
 
-def get_logger(name: str, log_level: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str, log_level: str | None = None) -> logging.Logger:
     """
     Get or create a logger for a specific module.
 
@@ -212,16 +218,19 @@ def get_logger(name: str, log_level: Optional[str] = None) -> logging.Logger:
 
     # Register logger with the manager
     # Only pass log_level if explicitly specified
-    kwargs = {
-        "name": name,
-        "file_strategy": "merged",
-    }
+    assert _LOGGER_MANAGER is not None
+
     if level_int is not None:
-        kwargs["log_level"] = level_int
+        return _LOGGER_MANAGER.register_logger(
+            name=name,
+            file_strategy="merged",
+            log_level=level_int,
+        )
 
-    logger = _LOGGER_MANAGER.register_logger(**kwargs)
-
-    return logger
+    return _LOGGER_MANAGER.register_logger(
+        name=name,
+        file_strategy="merged",
+    )
 
 
 def get_progress() -> ProgressTracker:

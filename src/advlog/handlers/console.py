@@ -101,4 +101,6 @@ def create_console_handler(
     Example:
         handler = create_console_handler(use_color=True, log_level=logging.INFO, show_location=True)
     """
-    return ConsoleHandler.create(use_color=use_color, use_rich=use_rich, log_level=log_level, show_location=show_location, **kwargs)
+    return ConsoleHandler.create(
+        use_color=use_color, use_rich=use_rich, log_level=log_level, show_location=show_location, **kwargs
+    )

@@ -186,8 +186,6 @@ def example_real_world_webapp():
     print("=" * 70)
 
     # Setup for a typical web application
-    timestamp = LogNamingStrategy.timestamped("webapp", suffix="")
-
     manager = LoggerManager(
         shared_console=True, shared_file=LogNamingStrategy.daily("app", suffix="all"), use_color=True
     )

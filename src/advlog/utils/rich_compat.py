@@ -13,10 +13,15 @@
 # limitations under the License.
 
 """Compatibility utilities for optional dependencies."""
+
 try:
     from rich.console import Console
     from rich.theme import Theme
+
     RICH_AVAILABLE = True
 except ImportError:
+    from typing import Any
+
     RICH_AVAILABLE = False
-    Console = Theme = None
+    Console: Any = None  # type: ignore
+    Theme: Any = None  # type: ignore

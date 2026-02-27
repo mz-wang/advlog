@@ -49,7 +49,7 @@ def main():
     #
     # Example 2: Breakpoint continue (specify exact file to append to)
     # initialize(
-    #     log_file="./logs/2026-01-02/20260102_102551_demo_workflow.log",  # TARGET SPECIFIC FILE
+    #     log_file_path="./logs/2026-01-02/20260102_102551_demo_workflow.log",  # TARGET SPECIFIC FILE
     #     file_mode="a"  # Append to this file
     # )
     #
@@ -62,10 +62,11 @@ def main():
     initialize(
         output_dir="./logs",
         session_name="demo_workflow",
+        suffix="v1",
         log_level="DEBUG",
         show_location=True,
-        log_file="D:/Workspace/m_wang/codelib/advlog/logs/breakpoint_test.log",
         file_mode="a",
+        use_date_dir=False,
     )
 
     log = get_logger(__name__)
