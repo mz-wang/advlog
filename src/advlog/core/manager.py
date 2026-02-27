@@ -80,6 +80,10 @@ class LoggerManager:
     ):
         """Initialize the logger manager.
 
+        Supports re-initialization to update global settings mid-run.
+        If already initialized, existing loggers will be updated to use
+        the new shared handlers.
+
         Args:
             shared_console: Whether all loggers share the same console handler
             shared_file: Optional path to shared log file for all loggers
@@ -89,11 +93,19 @@ class LoggerManager:
             show_location: Show source location (file:line) in console sidebar
             file_mode: File opening mode ('w' for overwrite, 'a' for append)
         """
-        # Avoid re-initialization
-        if hasattr(self, "_initialized"):
-            return
+        # Initialize internal storage ONLY ONCE
+        if not hasattr(self, "_internal_init"):
+            self.loggers: dict[str, logging.Logger] = {}
+            self._logger_strategies: dict[str, dict] = {}
+            self._console_handler: logging.Handler | None = None
+            self._shared_file_handler: logging.Handler | None = None
+            self._console: Console | None = None
+            self._internal_init = True
 
-        self._initialized = True
+        # Capture old handlers for cleanup if re-initializing
+        old_console = self._console_handler
+        old_file = self._shared_file_handler
+
         self.shared_console = shared_console
         self.shared_file = shared_file
         self.console_log_level = console_log_level
@@ -102,14 +114,6 @@ class LoggerManager:
         self.show_location = show_location
         self.file_mode = file_mode
 
-        # Storage for registered loggers
-        self.loggers: dict[str, logging.Logger] = {}
-
-        # Shared handlers
-        self._console_handler: logging.Handler | None = None
-        self._shared_file_handler: logging.Handler | None = None
-        self._console: Console | None = None
-
         # Initialize shared console if needed
         if shared_console:
             self._init_shared_console()
@@ -117,6 +121,40 @@ class LoggerManager:
         # Initialize shared file if provided
         if shared_file:
             self._init_shared_file()
+
+        # If already initialized previously, we need to refresh all existing loggers
+        if hasattr(self, "_initialized") and self._initialized:
+            self._refresh_loggers(old_console, old_file)
+
+        self._initialized = True
+
+    def _refresh_loggers(self, old_console=None, old_file=None):
+        """Update all registered loggers with new handlers."""
+        for name, logger in self.loggers.items():
+            # Remove old handlers if they are still attached
+            if old_console and old_console in logger.handlers:
+                logger.removeHandler(old_console)
+            if old_file and old_file in logger.handlers:
+                logger.removeHandler(old_file)
+
+            # Get the strategy used when this logger was registered
+            strategy = self._logger_strategies.get(name, {})
+            use_console = strategy.get("use_console", True)
+            file_strategy = strategy.get("file_strategy", "merged")
+
+            # Add new console handler if applicable
+            if use_console and self.shared_console and self._console_handler:
+                if self._console_handler not in logger.handlers:
+                    logger.addHandler(self._console_handler)
+
+            # Add new merged file handler if applicable
+            if file_strategy == "merged" and self._shared_file_handler:
+                if self._shared_file_handler not in logger.handlers:
+                    logger.addHandler(self._shared_file_handler)
+
+        # Close old file handler if it was replaced
+        if old_file and old_file != self._shared_file_handler:
+            old_file.close()
 
     def _init_shared_console(self):
         """Initialize shared console handler."""
@@ -186,6 +224,12 @@ class LoggerManager:
         # Return existing logger if already registered
         if name in self.loggers:
             return self.loggers[name]
+
+        # Store logger metadata for potential re-initialization
+        self._logger_strategies[name] = {
+            "use_console": use_console,
+            "file_strategy": file_strategy,
+        }
 
         # Create logger
         logger = logging.getLogger(name)
