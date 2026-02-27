@@ -26,7 +26,8 @@ from .formatter import (
     TableFormatter,
     create_aligned_formatter,
 )
-from .logger import AdvancedLogger, LoggerManager, create_logger_group
+from .logger import AdvancedLogger, setup_exception_logging
+from .manager import LoggerManager, create_logger_group
 
 __all__ = [
     "LoggerConfig",
@@ -42,4 +43,5 @@ __all__ = [
     "AdvancedLogger",
     "LoggerManager",
     "create_logger_group",
+    "setup_exception_logging",
 ]

@@ -16,7 +16,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -63,12 +63,12 @@ class LoggerConfig:
     enable_rich_tracebacks: bool = True
 
     # File rotation
-    max_file_size: Optional[int] = None  # bytes, None means no rotation
+    max_file_size: int | None = None  # bytes, None means no rotation
     backup_count: int = 3
 
     # Additional log files
-    separate_error_file: Optional[str] = None
-    separate_debug_file: Optional[str] = None
+    separate_error_file: str | None = None
+    separate_debug_file: str | None = None
 
     # Formatting
     date_format: str = "%Y-%m-%d %H:%M:%S"
@@ -92,10 +92,8 @@ class LoggerConfig:
 
         # Auto-disable color in non-supporting environments
         if self.auto_detect_environment and self.use_color:
-            try:
-                from ..utils.environment import supports_color
-            except ImportError:
-                from utils.environment import supports_color
+            from advlog.utils.environment import supports_color
+
             if not supports_color():
                 self.use_color = False
 
@@ -107,7 +105,7 @@ class LoggerConfig:
         """
         return getattr(logging, self.log_level)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary.
 
         Returns:
@@ -126,7 +124,7 @@ class LoggerConfig:
         }
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "LoggerConfig":
+    def from_dict(cls, config_dict: dict[str, Any]) -> "LoggerConfig":
         """Create config from dictionary.
 
         Args:

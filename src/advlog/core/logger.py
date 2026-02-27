@@ -17,13 +17,12 @@
 import logging
 import sys
 import threading
-from typing import Dict, List, Optional
+from typing import Optional
 
 from advlog.core.config import LoggerConfig
 from advlog.handlers.console import create_console_handler
 from advlog.handlers.file import create_file_handler
 from advlog.utils.console import get_shared_console
-from advlog.utils.path import ensure_dir
 from advlog.utils.rich_compat import RICH_AVAILABLE, Console
 
 
@@ -58,10 +57,10 @@ class AdvancedLogger:
         logger2 = AdvancedLogger(LoggerConfig(name="Module2"))
     """
 
-    _instances: Dict[str, "AdvancedLogger"] = {}
+    _instances: dict[str, "AdvancedLogger"] = {}
     _lock = __import__("threading").Lock()
 
-    def __new__(cls, config: Optional[LoggerConfig] = None):
+    def __new__(cls, config: LoggerConfig | None = None):
         """Create or return existing instance (singleton per logger name)."""
         # Get config first to determine the name
         cfg = config or LoggerConfig()
@@ -77,7 +76,7 @@ class AdvancedLogger:
             cls._instances[name] = instance
             return instance
 
-    def __init__(self, config: Optional[LoggerConfig] = None):
+    def __init__(self, config: LoggerConfig | None = None):
         """Initialize the logger.
 
         Args:
@@ -89,7 +88,7 @@ class AdvancedLogger:
 
         # Check if this instance was already initialized
         # (when __new__ returned an existing instance, this __init__ is called again)
-        if hasattr(self, '_logger') and self._logger is not None:
+        if hasattr(self, "_logger") and self._logger is not None:
             # Already initialized, just sync config reference
             self.config = self._instances[name].config
             return
@@ -98,8 +97,8 @@ class AdvancedLogger:
 
         # Initialize only if this is a new instance
         if name in self._instances and self._instances[name] is self:
-            self._console: Optional["Console"] = None
-            self._logger: Optional[logging.Logger] = None
+            self._console: Console | None = None
+            self._logger: logging.Logger | None = None
             self._initialize()
 
     def _initialize(self):
@@ -189,7 +188,7 @@ class AdvancedLogger:
             True if main process, False otherwise.
         """
         try:
-            from accelerate.state import PartialState
+            from accelerate.state import PartialState  # type: ignore
 
             return PartialState().is_main_process
         except ImportError:
@@ -201,6 +200,7 @@ class AdvancedLogger:
         Returns:
             Configured logging.Logger instance.
         """
+        assert self._logger is not None
         return self._logger
 
     def get_console(self) -> Optional["Console"]:
@@ -219,6 +219,7 @@ class AdvancedLogger:
         """
         level = level.upper()
         log_level = getattr(logging, level)
+        assert self._logger is not None
         self._logger.setLevel(log_level)
         self.config.log_level = level
 
@@ -228,6 +229,7 @@ class AdvancedLogger:
         Args:
             handler: Logging handler to add
         """
+        assert self._logger is not None
         self._logger.addHandler(handler)
 
     def remove_handler(self, handler: logging.Handler):
@@ -236,6 +238,7 @@ class AdvancedLogger:
         Args:
             handler: Logging handler to remove
         """
+        assert self._logger is not None
         self._logger.removeHandler(handler)
 
     @classmethod
@@ -268,30 +271,36 @@ class AdvancedLogger:
     # Convenience methods for logging
     def debug(self, message: str, *args, **kwargs):
         """Log a debug message."""
+        assert self._logger is not None
         self._logger.debug(message, *args, **kwargs)
 
     def info(self, message: str, *args, **kwargs):
         """Log an info message."""
+        assert self._logger is not None
         self._logger.info(message, *args, **kwargs)
 
     def warning(self, message: str, *args, **kwargs):
         """Log a warning message."""
+        assert self._logger is not None
         self._logger.warning(message, *args, **kwargs)
 
     def error(self, message: str, *args, **kwargs):
         """Log an error message."""
+        assert self._logger is not None
         self._logger.error(message, *args, **kwargs)
 
     def critical(self, message: str, *args, **kwargs):
         """Log a critical message."""
+        assert self._logger is not None
         self._logger.critical(message, *args, **kwargs)
 
     def exception(self, message: str, *args, **kwargs):
         """Log an exception with traceback."""
+        assert self._logger is not None
         self._logger.exception(message, *args, **kwargs)
 
 
-def setup_exception_logging(logger: Optional[logging.Logger] = None):
+def setup_exception_logging(logger: logging.Logger | None = None):
     """Setup global exception handler to log uncaught exceptions.
 
     Args:
@@ -369,7 +378,7 @@ class LoggerManager:
     def __init__(
         self,
         shared_console: bool = True,
-        shared_file: Optional[str] = None,
+        shared_file: str | None = None,
         console_log_level: int = logging.INFO,
         file_log_level: int = logging.DEBUG,
         use_color: bool = True,
@@ -401,12 +410,12 @@ class LoggerManager:
         self.file_mode = file_mode
 
         # Storage for registered loggers
-        self.loggers: Dict[str, logging.Logger] = {}
+        self.loggers: dict[str, logging.Logger] = {}
 
         # Shared handlers
-        self._console_handler: Optional[logging.Handler] = None
-        self._shared_file_handler: Optional[logging.Handler] = None
-        self._console: Optional["Console"] = None
+        self._console_handler: logging.Handler | None = None
+        self._shared_file_handler: logging.Handler | None = None
+        self._console: Console | None = None
 
         # Initialize shared console if needed
         if shared_console:
@@ -444,9 +453,9 @@ class LoggerManager:
         name: str,
         log_level: int = logging.DEBUG,
         file_strategy: str = "separate",
-        log_file: Optional[str] = None,
+        log_file: str | None = None,
         use_console: bool = True,
-        config: Optional[LoggerConfig] = None,
+        config: LoggerConfig | None = None,
     ) -> logging.Logger:
         """Register a new logger with the manager.
 
@@ -522,7 +531,7 @@ class LoggerManager:
 
         return logger
 
-    def get_logger(self, name: str) -> Optional[logging.Logger]:
+    def get_logger(self, name: str) -> logging.Logger | None:
         """Get a registered logger by name.
 
         Args:
@@ -533,7 +542,7 @@ class LoggerManager:
         """
         return self.loggers.get(name)
 
-    def get_all_loggers(self) -> Dict[str, logging.Logger]:
+    def get_all_loggers(self) -> dict[str, logging.Logger]:
         """Get all registered loggers.
 
         Returns:
@@ -606,13 +615,13 @@ class LoggerManager:
 
 # Convenience function
 def create_logger_group(
-    module_names: List[str],
+    module_names: list[str],
     shared_console: bool = True,
-    shared_file: Optional[str] = None,
+    shared_file: str | None = None,
     file_strategy: str = "separate",
     log_dir: str = "logs",
     use_color: bool = True,
-) -> Dict[str, logging.Logger]:
+) -> dict[str, logging.Logger]:
     """Create a group of loggers with coordinated output.
 
     Args:

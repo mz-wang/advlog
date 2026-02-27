@@ -16,10 +16,10 @@
 
 import logging
 from datetime import datetime
-from typing import Dict, Optional
-
+from typing import Literal
 
 # === Base Formatters ===
+
 
 class RichColorFormatter(logging.Formatter):
     """Formatter that adds Rich markup for colored output.
@@ -48,8 +48,8 @@ class RichColorFormatter(logging.Formatter):
     def __init__(
         self,
         fmt: str = "%(levelname)-8s %(message)s",
-        datefmt: Optional[str] = None,
-        log_colors: Optional[Dict[str, str]] = None,
+        datefmt: str | None = None,
+        log_colors: dict[str, str] | None = None,
     ):
         super().__init__(fmt, datefmt)
         self.log_colors = log_colors or {
@@ -91,7 +91,7 @@ class PlainFormatter(logging.Formatter):
         - For file output: defaults to yyyy/mm/dd HH:MM:SS
     """
 
-    def __init__(self, fmt: str = "%(asctime)s [%(levelname)s] %(message)s", datefmt: Optional[str] = None):
+    def __init__(self, fmt: str = "%(asctime)s [%(levelname)s] %(message)s", datefmt: str | None = None):
         # Use default datefmt based on context or provided value
         if datefmt is None:
             # Try to determine if this is for console or file from the calling context
@@ -125,7 +125,11 @@ class IndentedFormatter(logging.Formatter):
     """
 
     def __init__(
-        self, fmt: Optional[str] = None, datefmt: Optional[str] = None, style: str = "%", indent_size: int = 27
+        self,
+        fmt: str | None = None,
+        datefmt: str | None = None,
+        style: Literal["%", "{", "$"] = "%",
+        indent_size: int = 27,
     ):
         super().__init__(fmt, datefmt, style)
         self.indent_size = indent_size
@@ -179,7 +183,6 @@ class JSONFormatter(logging.Formatter):
             JSON-formatted log message
         """
         import json
-        from datetime import datetime
 
         log_data = {
             "timestamp": datetime.fromtimestamp(record.created).isoformat(),
@@ -229,6 +232,7 @@ class JSONFormatter(logging.Formatter):
 
 # === Aligned Formatters ===
 
+
 class AlignedFormatter(logging.Formatter):
     """Formatter with precise field alignment control.
 
@@ -253,9 +257,9 @@ class AlignedFormatter(logging.Formatter):
         # Field widths
         time_width: int = 12,
         level_width: int = 8,
-        name_width: Optional[int] = None,
-        location_width: Optional[int] = None,
-        message_width: Optional[int] = None,
+        name_width: int | None = None,
+        location_width: int | None = None,
+        message_width: int | None = None,
         # Alignment: "left", "right", "center"
         align_time: str = "left",
         align_level: str = "left",
@@ -313,7 +317,7 @@ class AlignedFormatter(logging.Formatter):
         self.show_name = show_name
         self.show_location = show_location
 
-    def _align_field(self, text: str, width: Optional[int], align: str) -> str:
+    def _align_field(self, text: str, width: int | None, align: str) -> str:
         """Align field
 
         Args:
@@ -461,8 +465,8 @@ class ColumnFormatter(logging.Formatter):
 
     def __init__(
         self,
-        columns: list = None,
-        widths: dict = None,
+        columns: list[str] | None = None,
+        widths: dict[str, int | None] | None = None,
         separator: str = " | ",
         datefmt: str = "%H:%M:%S",
     ):

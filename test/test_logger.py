@@ -45,6 +45,7 @@ class TestAdvancedLogger:
     def test_get_logger(self):
         """Test that get_logger returns a logging.Logger instance."""
         from advlog.core import AdvancedLogger
+
         mock_logger = AdvancedLogger(LoggerConfig(name="TestLogger"))
         logger = mock_logger.get_logger()
         assert isinstance(logger, logging.Logger)
@@ -52,6 +53,7 @@ class TestAdvancedLogger:
     def test_logging_levels(self):
         """Test logging at different levels."""
         from advlog.core import AdvancedLogger
+
         mock_logger = AdvancedLogger(LoggerConfig(name="TestLogger"))
         logger = mock_logger.get_logger()
 
@@ -65,11 +67,14 @@ class TestAdvancedLogger:
     def test_set_level(self):
         """Test changing log level."""
         from advlog.core import AdvancedLogger
+
         mock_logger = AdvancedLogger(LoggerConfig(name="TestLogger"))
         mock_logger.set_level("DEBUG")
+        assert mock_logger._logger is not None
         assert mock_logger._logger.level == logging.DEBUG
 
         mock_logger.set_level("ERROR")
+        assert mock_logger._logger is not None
         assert mock_logger._logger.level == logging.ERROR
 
     def test_reset_instance(self):
@@ -170,6 +175,7 @@ class TestIntegration:
         """Test AdvancedLogger with file output."""
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = Path(tmpdir) / "test.log"
             logger = AdvancedLogger(
@@ -191,6 +197,7 @@ class TestIntegration:
         """Test multiple loggers writing to separate files."""
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as tmpdir:
             logger1 = AdvancedLogger(
                 LoggerConfig(

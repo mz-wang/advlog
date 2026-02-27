@@ -16,13 +16,12 @@
 
 import logging
 import threading
-from typing import Dict, List, Optional
 
-from core.config import LoggerConfig
-from handlers.console import create_console_handler
-from handlers.file import create_file_handler
-from utils.console import get_shared_console
-from utils.rich_compat import RICH_AVAILABLE, Console
+from advlog.core.config import LoggerConfig
+from advlog.handlers.console import create_console_handler
+from advlog.handlers.file import create_file_handler
+from advlog.utils.console import get_shared_console
+from advlog.utils.rich_compat import RICH_AVAILABLE, Console
 
 
 class LoggerManager:
@@ -72,10 +71,12 @@ class LoggerManager:
     def __init__(
         self,
         shared_console: bool = True,
-        shared_file: Optional[str] = None,
+        shared_file: str | None = None,
         console_log_level: int = logging.INFO,
         file_log_level: int = logging.DEBUG,
         use_color: bool = True,
+        show_location: bool = False,
+        file_mode: str = "w",
     ):
         """Initialize the logger manager.
 
@@ -85,6 +86,8 @@ class LoggerManager:
             console_log_level: Log level for console output
             file_log_level: Log level for file output
             use_color: Enable colored console output
+            show_location: Show source location (file:line) in console sidebar
+            file_mode: File opening mode ('w' for overwrite, 'a' for append)
         """
         # Avoid re-initialization
         if hasattr(self, "_initialized"):
@@ -96,14 +99,16 @@ class LoggerManager:
         self.console_log_level = console_log_level
         self.file_log_level = file_log_level
         self.use_color = use_color
+        self.show_location = show_location
+        self.file_mode = file_mode
 
         # Storage for registered loggers
-        self.loggers: Dict[str, logging.Logger] = {}
+        self.loggers: dict[str, logging.Logger] = {}
 
         # Shared handlers
-        self._console_handler: Optional[logging.Handler] = None
-        self._shared_file_handler: Optional[logging.Handler] = None
-        self._console: Optional["Console"] = None
+        self._console_handler: logging.Handler | None = None
+        self._shared_file_handler: logging.Handler | None = None
+        self._console: Console | None = None
 
         # Initialize shared console if needed
         if shared_console:
@@ -119,7 +124,11 @@ class LoggerManager:
             self._console = get_shared_console()
 
         self._console_handler = create_console_handler(
-            use_color=self.use_color, use_rich=RICH_AVAILABLE, log_level=self.console_log_level, console=self._console
+            use_color=self.use_color,
+            use_rich=RICH_AVAILABLE,
+            log_level=self.console_log_level,
+            show_location=self.show_location,
+            console=self._console,
         )
 
     def _init_shared_file(self):
@@ -127,8 +136,9 @@ class LoggerManager:
         if self.shared_file:
             self._shared_file_handler = create_file_handler(
                 log_file=self.shared_file,
-                mode="a",  # Append mode for shared file
+                mode=self.file_mode,
                 log_level=self.file_log_level,
+                show_location=self.show_location,
             )
 
     def register_logger(
@@ -136,9 +146,9 @@ class LoggerManager:
         name: str,
         log_level: int = logging.DEBUG,
         file_strategy: str = "separate",
-        log_file: Optional[str] = None,
+        log_file: str | None = None,
         use_console: bool = True,
-        config: Optional[LoggerConfig] = None,
+        config: LoggerConfig | None = None,
     ) -> logging.Logger:
         """Register a new logger with the manager.
 
@@ -190,12 +200,21 @@ class LoggerManager:
             logger.addHandler(self._console_handler)
         elif use_console and not self.shared_console:
             # Create individual console handler
-            console_handler = create_console_handler(use_color=self.use_color, log_level=self.console_log_level)
+            console_handler = create_console_handler(
+                use_color=self.use_color,
+                log_level=self.console_log_level,
+                show_location=self.show_location,
+            )
             logger.addHandler(console_handler)
 
         # Add file handler based on strategy
         if file_strategy == "separate" and log_file:
-            file_handler = create_file_handler(log_file=log_file, mode="a", log_level=self.file_log_level)
+            file_handler = create_file_handler(
+                log_file=log_file,
+                mode="a",
+                log_level=self.file_log_level,
+                show_location=self.show_location,
+            )
             logger.addHandler(file_handler)
         elif file_strategy == "merged" and self._shared_file_handler:
             logger.addHandler(self._shared_file_handler)
@@ -205,7 +224,7 @@ class LoggerManager:
 
         return logger
 
-    def get_logger(self, name: str) -> Optional[logging.Logger]:
+    def get_logger(self, name: str) -> logging.Logger | None:
         """Get a registered logger by name.
 
         Args:
@@ -216,7 +235,7 @@ class LoggerManager:
         """
         return self.loggers.get(name)
 
-    def get_all_loggers(self) -> Dict[str, logging.Logger]:
+    def get_all_loggers(self) -> dict[str, logging.Logger]:
         """Get all registered loggers.
 
         Returns:
@@ -289,13 +308,13 @@ class LoggerManager:
 
 # Convenience function
 def create_logger_group(
-    module_names: List[str],
+    module_names: list[str],
     shared_console: bool = True,
-    shared_file: Optional[str] = None,
+    shared_file: str | None = None,
     file_strategy: str = "separate",
     log_dir: str = "logs",
     use_color: bool = True,
-) -> Dict[str, logging.Logger]:
+) -> dict[str, logging.Logger]:
     """Create a group of loggers with coordinated output.
 
     Args:

@@ -14,7 +14,7 @@
 
 """Progress bar management - auto cleanup and lifecycle management."""
 
-from typing import Dict, Optional
+from typing import Optional
 
 from rich.progress import Progress, TaskID
 
@@ -89,7 +89,7 @@ class ProgressTracker:
         )
 
         # Track task status
-        self.tasks: Dict[TaskID, dict] = {}
+        self.tasks: dict[TaskID, dict] = {}
         self.persistent_tasks: set = set()  # Tasks to keep
         self.completed_tasks: list = []  # Completed task history
 
@@ -105,7 +105,7 @@ class ProgressTracker:
     def add_task(
         self,
         description: str,
-        total: Optional[float] = 100.0,
+        total: float | None = 100.0,
         persistent: bool = False,
         **kwargs,
     ) -> TaskID:
@@ -227,7 +227,7 @@ class ProgressTracker:
         """
         self.console.log(message, **kwargs)
 
-    def get_task_info(self, task_id: TaskID) -> Optional[dict]:
+    def get_task_info(self, task_id: TaskID) -> dict | None:
         """Get task info.
 
         Args:
@@ -238,7 +238,7 @@ class ProgressTracker:
         """
         return self.tasks.get(task_id)
 
-    def get_active_tasks(self) -> Dict[TaskID, dict]:
+    def get_active_tasks(self) -> dict[TaskID, dict]:
         """Get all active tasks.
 
         Returns:
