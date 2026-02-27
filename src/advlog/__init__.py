@@ -61,7 +61,7 @@ Modules:
     api: Global logging management (initialize, get_logger, get_progress)
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __author__ = "Mengzhao Wang"
 
 # Core imports

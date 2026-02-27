@@ -1,3 +1,9 @@
+## v0.1.2 (2026-02-27)
+
+### Fix
+
+- **core**: support LoggerManager re-initialization and dynamic handler refresh
+
 ## v0.1.1 (2026-02-27)
 
 ### Refactor
