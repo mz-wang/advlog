@@ -38,7 +38,7 @@ class FileHandler:
         location_width: int = 50,
         indent_size: int = 27,
         date_format: str = "%Y-%m-%d %H:%M:%S",
-        log_format: str = "%(asctime)s [%(levelname)s] %(message)s",
+        log_format: str = "%(asctime)s |%(levelname)-8s| %(message)s",
         use_json_format: bool = False,
     ) -> logging.Handler:
         """Create a file handler.
@@ -60,7 +60,7 @@ class FileHandler:
             Configured file handler
         """
         # Lazy import formatters to avoid circular imports
-        from advlog.core.formatter import AlignedFormatter, IndentedFormatter, JSONFormatter, PlainFormatter
+        from advlog.core.formatter import IndentedFormatter, JSONFormatter, PlainFormatter
 
         # Create directory if it doesn't exist
         if log_file:
@@ -73,22 +73,15 @@ class FileHandler:
         if use_json_format:
             formatter = JSONFormatter()
         elif show_location and use_indented_format:
-            # Use AlignedFormatter for better location alignment
-            # File format: yyyy/mm/dd hh:mm:ss (long format)
-            formatter = AlignedFormatter(
-                time_width=19,  # yyyy/mm/dd hh:mm:ss
-                level_width=8,
-                location_width=location_width,
-                align_time="left",
-                align_level="left",
-                align_location="right",
-                datefmt="%Y/%m/%d %H:%M:%S",
-            )
+            location_fmt = "%(asctime)s |%(levelname)-8s| [%(filename)s:%(lineno)d:%(funcName)s] %(message)s"
+            formatter = IndentedFormatter(fmt=location_fmt, datefmt=date_format, indent_size=indent_size)
         elif use_indented_format:
             formatter = IndentedFormatter(fmt=log_format, datefmt=date_format, indent_size=indent_size)
         else:
             if show_location:
-                formatter = PlainFormatter(fmt=f"{log_format} (%(pathname)s:%(lineno)d)", datefmt=date_format)
+                formatter = PlainFormatter(
+                    fmt=f"{log_format} [%(filename)s:%(lineno)d:%(funcName)s]", datefmt=date_format
+                )
             else:
                 formatter = PlainFormatter(fmt=log_format, datefmt=date_format)
 
@@ -138,7 +131,7 @@ class RotatingFileHandler:
             Configured rotating file handler
         """
         # Lazy import formatters to avoid circular imports
-        from advlog.core.formatter import AlignedFormatter, IndentedFormatter, PlainFormatter
+        from advlog.core.formatter import IndentedFormatter, PlainFormatter
 
         # Create directory if it doesn't exist
         ensure_dir(log_file)
@@ -148,22 +141,15 @@ class RotatingFileHandler:
 
         # Choose formatter
         if show_location and use_indented_format:
-            # Use AlignedFormatter for better location alignment
-            # File format: yyyy/mm/dd hh:mm:ss (long format)
-            formatter = AlignedFormatter(
-                time_width=19,  # yyyy/mm/dd hh:mm:ss
-                level_width=8,
-                location_width=location_width,
-                align_time="left",
-                align_level="left",
-                align_location="right",
-                datefmt="%Y/%m/%d %H:%M:%S",
-            )
+            location_fmt = "%(asctime)s |%(levelname)-8s| [%(filename)s:%(lineno)d:%(funcName)s] %(message)s"
+            formatter = IndentedFormatter(fmt=location_fmt, datefmt=date_format, indent_size=indent_size)
         elif use_indented_format:
             formatter = IndentedFormatter(fmt=log_format, datefmt=date_format, indent_size=indent_size)
         else:
             if show_location:
-                formatter = PlainFormatter(fmt=f"{log_format} (%(pathname)s:%(lineno)d)", datefmt=date_format)
+                formatter = PlainFormatter(
+                    fmt=f"{log_format} [%(filename)s:%(lineno)d:%(funcName)s]", datefmt=date_format
+                )
             else:
                 formatter = PlainFormatter(fmt=log_format, datefmt=date_format)
 

@@ -21,6 +21,27 @@ from typing import Optional
 from advlog.utils.console import get_shared_console
 from advlog.utils.rich_compat import RICH_AVAILABLE, Console
 
+if RICH_AVAILABLE:
+    from rich.logging import RichHandler
+
+    class IndentedRichHandler(RichHandler):
+        """RichHandler that supports 'depth' extra attribute for message indentation."""
+
+        def emit(self, record: logging.LogRecord) -> None:
+            """Emit the log record with indentation if 'depth' is present."""
+            depth = getattr(record, "depth", 0)
+            if depth > 0:
+                indent = "  " * depth
+                # Temporarily modify message for recording indentation
+                original_msg = record.msg
+                record.msg = f"{indent}{original_msg}"
+                try:
+                    super().emit(record)
+                finally:
+                    record.msg = original_msg
+            else:
+                super().emit(record)
+
 
 class ConsoleHandler:
     """Factory for creating console handlers.
@@ -55,13 +76,11 @@ class ConsoleHandler:
 
         # Use Rich handler if available and requested
         if use_rich and RICH_AVAILABLE:
-            from rich.logging import RichHandler
-
             if console is None:
                 console = get_shared_console()
 
-            # Use RichHandler with native time format [yy/mm/dd hh:mm:ss]
-            handler = RichHandler(
+            # Use IndentedRichHandler (wrapper around RichHandler) with native time format [yy/mm/dd hh:mm:ss]
+            handler = IndentedRichHandler(
                 console=console,
                 show_time=True,
                 log_time_format="[%y/%m/%d %H:%M:%S]",  # yy/mm/dd hh:mm:ss with brackets

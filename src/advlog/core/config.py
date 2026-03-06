@@ -15,74 +15,63 @@
 """Configuration management for the logging system."""
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
 @dataclass
 class LoggerConfig:
-    """Configuration for AdvancedLogger.
+    """Configuration for LoggerManager.register_logger().
+
+    Provides fine-grained per-logger control. Pass as the ``config`` argument
+    to ``LoggerManager.register_logger()`` to override the manager's defaults
+    for that specific logger.
 
     Attributes:
-        name: Logger name (used for multiple logger instances)
-        log_file: Path to the main log file
+        name: Logger name (module name or custom identifier)
+        log_file: Path to an individual log file for this logger
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         file_mode: File opening mode ('w' for overwrite, 'a' for append)
         use_color: Enable colored console output
         console_output: Enable console output
-        enable_progress: Enable progress bar support
         enable_rich_tracebacks: Enable rich formatted tracebacks
-        max_file_size: Maximum log file size in bytes (for rotation)
-        backup_count: Number of backup files to keep when rotating
-        separate_error_file: Path to separate error log file
-        date_format: Date format string for log messages
-        log_format: Format string for log messages
+        show_location: Show source file/line in console sidebar
+        date_format: Date format string for file log messages
+        log_format: Format string for file log messages
         encoding: File encoding
-        handlers: Custom handlers to add (advanced usage)
+        propagate: Whether log records propagate to the root logger
+        use_accelerate: Suppress output on non-main processes (distributed training)
 
     Example:
         config = LoggerConfig(
-            name="my_app",
-            log_file="logs/app.log",
-            log_level="INFO",
-            use_color=True,
-            separate_error_file="logs/error.log"
+            name="my_module",
+            log_file="logs/my_module.log",
+            log_level="DEBUG",
+            show_location=True,
         )
+        logger = manager.register_logger(config=config)
     """
 
-    # Basic settings
+    # Identity & file
     name: str = "AppLogger"
-    log_file: str = "logs/app.log"
+    log_file: str | None = None
     log_level: str = "INFO"
-    file_mode: str = "w"
+    file_mode: str = "a"
 
-    # Feature toggles
+    # Console behaviour
     use_color: bool = True
     console_output: bool = True
-    enable_progress: bool = True
     enable_rich_tracebacks: bool = True
+    show_location: bool = False
 
-    # File rotation
-    max_file_size: int | None = None  # bytes, None means no rotation
-    backup_count: int = 3
-
-    # Additional log files
-    separate_error_file: str | None = None
-    separate_debug_file: str | None = None
-
-    # Formatting
+    # File formatting
     date_format: str = "%Y-%m-%d %H:%M:%S"
     log_format: str = "%(asctime)s [%(levelname)s] %(message)s"
-    indent_size: int = 27
     encoding: str = "utf-8"
 
-    # Advanced
-    handlers: list = field(default_factory=list)
+    # Misc
     propagate: bool = False
-
-    # Environment-specific
     use_accelerate: bool = False  # For distributed training
-    auto_detect_environment: bool = True
 
     def __post_init__(self):
         """Validate and normalize configuration."""
@@ -90,8 +79,7 @@ class LoggerConfig:
         if self.log_level not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
             raise ValueError(f"Invalid log level: {self.log_level}")
 
-        # Auto-disable color in non-supporting environments
-        if self.auto_detect_environment and self.use_color:
+        if self.use_color:
             from advlog.utils.environment import supports_color
 
             if not supports_color():
@@ -106,11 +94,7 @@ class LoggerConfig:
         return getattr(logging, self.log_level)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert config to dictionary.
-
-        Returns:
-            Dictionary representation of the configuration.
-        """
+        """Convert config to dictionary."""
         return {
             "name": self.name,
             "log_file": self.log_file,
@@ -118,19 +102,11 @@ class LoggerConfig:
             "file_mode": self.file_mode,
             "use_color": self.use_color,
             "console_output": self.console_output,
-            "enable_progress": self.enable_progress,
-            "max_file_size": self.max_file_size,
-            "backup_count": self.backup_count,
+            "show_location": self.show_location,
+            "propagate": self.propagate,
         }
 
     @classmethod
     def from_dict(cls, config_dict: dict[str, Any]) -> "LoggerConfig":
-        """Create config from dictionary.
-
-        Args:
-            config_dict: Dictionary containing configuration values.
-
-        Returns:
-            LoggerConfig instance.
-        """
+        """Create config from dictionary."""
         return cls(**config_dict)

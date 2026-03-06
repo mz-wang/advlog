@@ -61,6 +61,7 @@ venv.bak/
 *.swp
 *.swo
 *~
+.ruff_cache/
 
 # Logs
 logs/
@@ -75,4 +76,5 @@ test_output/
 temp/
 tmp/
 dev_space/
+devmemo/
 

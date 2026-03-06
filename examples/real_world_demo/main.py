@@ -32,6 +32,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from advlog import get_logger, get_progress, initialize
 
+log = get_logger(__name__)
+
 
 def main():
     """Main workflow function."""

@@ -43,8 +43,9 @@ Quick Start:
         ...         progress.update(task, advance=1)
 
     Training logger:
-        >>> from advlog import AdvancedLogger, TrainingLogger
-        >>> logger = AdvancedLogger().get_logger()
+        >>> from advlog import TrainingLogger
+        >>> import logging
+        >>> logger = logging.getLogger(__name__)
         >>> trainer = TrainingLogger(logger)
         >>> trainer.log_train_step(
         ...     epoch=1, total_epochs=10,
@@ -66,21 +67,14 @@ __author__ = "Mengzhao Wang"
 
 # Core imports
 from .core import (
-    AdvancedLogger,
-    AlignedFormatter,
-    ColumnFormatter,
-    CompactFormatter,
     IndentedFormatter,
     JSONFormatter,
     LoggerConfig,
     LoggerManager,
     PlainFormatter,
     RichColorFormatter,
-    TableFormatter,
-    create_aligned_formatter,
     create_logger_group,
 )
-from .core.logger import setup_exception_logging
 
 # Handler imports
 from .handlers import (
@@ -101,12 +95,13 @@ except ImportError:
     PLUGINS_AVAILABLE = False
 
 # Utility imports
-# Global management API (replaces old get_logger)
+# Global management API
 from .api import (
     get_logger,
     get_progress,
     initialize,
     reset,
+    setup_exception_logging,
 )
 from .utils import (
     LogNamingStrategy,
@@ -120,20 +115,13 @@ __all__ = [
     # Version
     "__version__",
     # Core
-    "AdvancedLogger",
     "LoggerConfig",
     "LoggerManager",
     "create_logger_group",
     "IndentedFormatter",
     "RichColorFormatter",
-    "AlignedFormatter",
-    "TableFormatter",
-    "CompactFormatter",
-    "ColumnFormatter",
     "PlainFormatter",
     "JSONFormatter",
-    "create_aligned_formatter",
-    "setup_exception_logging",
     # Handlers
     "create_console_handler",
     "create_file_handler",
@@ -151,4 +139,5 @@ __all__ = [
     "get_logger",
     "get_progress",
     "reset",
+    "setup_exception_logging",
 ]

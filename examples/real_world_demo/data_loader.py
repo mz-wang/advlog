@@ -17,6 +17,7 @@
 Demonstrates using advlog's get_logger and get_progress in a separate module.
 The logger is automatically shared with the main module via the global singleton.
 """
+
 import time
 
 from advlog import get_logger
@@ -34,7 +35,7 @@ def load_data(progress):
     Returns:
         dict: Loaded data
     """
-    log.info("Starting data loading process")
+    log.info("Starting data loading process", extra={"depth": 1})
 
     # Simulate loading multiple files
     files = [
@@ -49,16 +50,16 @@ def load_data(progress):
 
     data = {}
     for i, filename in enumerate(files):
-        log.debug(f"Loading file: {filename}")
+        log.debug(f"Loading file: {filename}", extra={"depth": 2})
         time.sleep(0.2)  # Simulate file loading
 
         # Simulate loaded data
         data[filename] = {"rows": 100 * (i + 1), "columns": 10}
 
-        log.debug(f"Loaded {data[filename]['rows']} rows from {filename}")
+        log.debug(f"Loaded {data[filename]['rows']} rows from {filename}", extra={"depth": 2})
         progress.update(task, advance=1)
 
     progress.remove_task(task)
-    log.info(f"Data loading complete: {len(files)} files loaded")
+    log.info(f"Data loading complete: {len(files)} files loaded", extra={"depth": 1})
 
     return data

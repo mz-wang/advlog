@@ -29,7 +29,7 @@ wheels = [
 
 [[package]]
 name = "advlog-core"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "omegaconf" },
@@ -59,6 +59,11 @@ torch = [
     { name = "torchinfo" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'distributed'", specifier = ">=0.20.0" },
@@ -74,6 +79,9 @@ requires-dist = [
     { name = "vermin", marker = "extra == 'dev'", specifier = ">=1.6.0" },
 ]
 provides-extras = ["config", "torch", "distributed", "all", "dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "antlr4-python3-runtime"

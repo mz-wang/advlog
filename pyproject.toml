@@ -127,3 +127,8 @@ version_files = [
     "pyproject.toml:^version",
     "src/advlog/__init__.py:^__version__"
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

@@ -1,4 +1,4 @@
-# Copyright 2026 Mengzhao Wang
+﻿# Copyright 2026 Mengzhao Wang
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,219 +12,205 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for AdvancedLogger and LoggerManager."""
+"""Tests for LoggerManager and global API."""
 
 import logging
+import tempfile
+from pathlib import Path
 
-from advlog.core import AdvancedLogger, LoggerConfig, LoggerManager, create_logger_group
+import pytest
+
+from advlog.core import LoggerConfig, LoggerManager, create_logger_group
 
 
-class TestAdvancedLogger:
-    """Test AdvancedLogger class."""
-
-    def test_imports(self):
-        """Test that AdvancedLogger can be imported."""
-        from advlog import AdvancedLogger
-
-        assert AdvancedLogger is not None
-
-    def test_singleton_per_name(self):
-        """Test that loggers with the same name are singletons."""
-        logger1 = AdvancedLogger(LoggerConfig(name="TestLogger"))
-        logger2 = AdvancedLogger(LoggerConfig(name="TestLogger"))
-
-        assert logger1 is logger2, "Loggers with same name should be the same instance"
-
-    def test_different_names(self):
-        """Test that loggers with different names are different instances."""
-        logger1 = AdvancedLogger(LoggerConfig(name="Logger1"))
-        logger2 = AdvancedLogger(LoggerConfig(name="Logger2"))
-
-        assert logger1 is not logger2, "Loggers with different names should be different instances"
-
-    def test_get_logger(self):
-        """Test that get_logger returns a logging.Logger instance."""
-        from advlog.core import AdvancedLogger
-
-        mock_logger = AdvancedLogger(LoggerConfig(name="TestLogger"))
-        logger = mock_logger.get_logger()
-        assert isinstance(logger, logging.Logger)
-
-    def test_logging_levels(self):
-        """Test logging at different levels."""
-        from advlog.core import AdvancedLogger
-
-        mock_logger = AdvancedLogger(LoggerConfig(name="TestLogger"))
-        logger = mock_logger.get_logger()
-
-        # Test that methods exist
-        assert hasattr(logger, "debug")
-        assert hasattr(logger, "info")
-        assert hasattr(logger, "warning")
-        assert hasattr(logger, "error")
-        assert hasattr(logger, "critical")
-
-    def test_set_level(self):
-        """Test changing log level."""
-        from advlog.core import AdvancedLogger
-
-        mock_logger = AdvancedLogger(LoggerConfig(name="TestLogger"))
-        mock_logger.set_level("DEBUG")
-        assert mock_logger._logger is not None
-        assert mock_logger._logger.level == logging.DEBUG
-
-        mock_logger.set_level("ERROR")
-        assert mock_logger._logger is not None
-        assert mock_logger._logger.level == logging.ERROR
-
-    def test_reset_instance(self):
-        """Test resetting a specific logger instance."""
-        logger1 = AdvancedLogger(LoggerConfig(name="TestLogger"))
-        AdvancedLogger.reset_instance("TestLogger")
-
-        # Create again after reset
-        logger2 = AdvancedLogger(LoggerConfig(name="TestLogger"))
-
-        assert logger1 is not logger2, "After reset, should get a new instance"
-
-    def test_get_instance(self):
-        """Test getting an existing logger instance."""
-        logger1 = AdvancedLogger(LoggerConfig(name="TestLogger"))
-        logger2 = AdvancedLogger.get_instance("TestLogger")
-
-        assert logger1 is logger2, "get_instance should return the same instance"
-
-    def test_get_nonexistent_instance(self):
-        """Test getting a non-existent logger instance."""
-        logger = AdvancedLogger.get_instance("NonExistent")
-        assert logger is None
+@pytest.fixture(autouse=True)
+def reset_manager():
+    """Reset LoggerManager singleton between tests."""
+    yield
+    LoggerManager.reset()
 
 
 class TestLoggerManager:
     """Test LoggerManager class."""
 
     def test_singleton(self):
-        """Test that LoggerManager is a singleton."""
-        manager1 = LoggerManager()
-        manager2 = LoggerManager()
-
-        assert manager1 is manager2, "LoggerManager should be a singleton"
+        """LoggerManager is a singleton."""
+        m1 = LoggerManager()
+        m2 = LoggerManager()
+        assert m1 is m2
 
     def test_register_logger(self):
-        """Test registering a logger."""
-        manager = LoggerManager()
-        logger = manager.register_logger("test_logger")
-
+        """Registering a logger returns a logging.Logger."""
+        manager = LoggerManager(shared_console=False)
+        logger = manager.register_logger("test_module", file_strategy="none")
         assert isinstance(logger, logging.Logger)
-        assert "test_logger" in manager.loggers
+        assert "test_module" in manager.loggers
+
+    def test_register_returns_same_logger(self):
+        """Registering the same name twice returns the same object."""
+        manager = LoggerManager(shared_console=False)
+        l1 = manager.register_logger("mod", file_strategy="none")
+        l2 = manager.register_logger("mod", file_strategy="none")
+        assert l1 is l2
 
     def test_get_logger(self):
-        """Test getting a registered logger."""
-        manager = LoggerManager()
-        registered = manager.register_logger("test_logger")
-        retrieved = manager.get_logger("test_logger")
-
-        assert registered is retrieved
+        """get_logger retrieves a previously registered logger."""
+        manager = LoggerManager(shared_console=False)
+        registered = manager.register_logger("mod", file_strategy="none")
+        assert manager.get_logger("mod") is registered
 
     def test_get_nonexistent_logger(self):
-        """Test getting a non-existent logger."""
-        manager = LoggerManager()
-        logger = manager.get_logger("non_existent")
-
-        assert logger is None
+        """get_logger returns None for unknown names."""
+        manager = LoggerManager(shared_console=False)
+        assert manager.get_logger("does_not_exist") is None
 
     def test_unregister_logger(self):
-        """Test unregistering a logger."""
-        manager = LoggerManager()
-        manager.register_logger("test_logger")
-
-        assert "test_logger" in manager.loggers
-
-        manager.unregister_logger("test_logger")
-        assert "test_logger" not in manager.loggers
+        """Unregistering removes the logger from the manager."""
+        manager = LoggerManager(shared_console=False)
+        manager.register_logger("mod", file_strategy="none")
+        manager.unregister_logger("mod")
+        assert "mod" not in manager.loggers
 
     def test_get_all_loggers(self):
-        """Test getting all registered loggers."""
-        manager = LoggerManager()
-        manager.register_logger("logger1")
-        manager.register_logger("logger2")
-
+        """get_all_loggers returns all registered loggers."""
+        manager = LoggerManager(shared_console=False)
+        manager.register_logger("a", file_strategy="none")
+        manager.register_logger("b", file_strategy="none")
         all_loggers = manager.get_all_loggers()
-        assert len(all_loggers) == 2
-        assert "logger1" in all_loggers
-        assert "logger2" in all_loggers
+        assert "a" in all_loggers
+        assert "b" in all_loggers
 
-    def test_create_logger_group(self):
-        """Test create_logger_group function."""
+    def test_register_with_loggerconfig(self):
+        """register_logger correctly applies LoggerConfig overrides."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = str(Path(tmpdir) / "mod.log")
+            config = LoggerConfig(
+                name="configured_mod",
+                log_file=log_file,
+                log_level="DEBUG",
+                show_location=False,
+                console_output=False,
+            )
+            manager = LoggerManager(shared_console=False)
+            logger = manager.register_logger(config=config)
+            assert isinstance(logger, logging.Logger)
+            assert logger.level == logging.DEBUG
+            assert Path(log_file).parent.exists()
+            LoggerManager.reset()
+
+    def test_register_loggerconfig_requires_name(self):
+        """register_logger raises ValueError when name is empty and no config given."""
+        manager = LoggerManager(shared_console=False)
+        with pytest.raises(ValueError):
+            manager.register_logger()  # no name, no config
+
+    def test_file_logging(self):
+        """Logger writes to file when configured with separate strategy."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = str(Path(tmpdir) / "test.log")
+            manager = LoggerManager(shared_console=False)
+            logger = manager.register_logger(
+                "file_mod",
+                file_strategy="separate",
+                log_file=log_file,
+            )
+            logger.info("hello from test")
+            for h in logger.handlers:
+                h.flush()
+            assert Path(log_file).exists()
+            assert "hello from test" in Path(log_file).read_text()
+            LoggerManager.reset()
+
+    def test_merged_file_strategy(self):
+        """Loggers with merged strategy share the shared file handler."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = str(Path(tmpdir) / "shared.log")
+            manager = LoggerManager(shared_console=False, shared_file=shared, file_mode="w")
+            l1 = manager.register_logger("m1", file_strategy="merged")
+            l2 = manager.register_logger("m2", file_strategy="merged")
+            l1.warning("from m1")
+            l2.warning("from m2")
+            for h in l1.handlers + l2.handlers:
+                h.flush()
+            content = Path(shared).read_text()
+            assert "from m1" in content
+            assert "from m2" in content
+            LoggerManager.reset()
+
+
+class TestCreateLoggerGroup:
+    """Test create_logger_group convenience function."""
+
+    def test_creates_multiple_loggers(self):
+        """create_logger_group returns a dict of logging.Logger instances."""
         loggers = create_logger_group(
-            ["module1", "module2"],
+            ["api", "db"],
             shared_console=False,
             file_strategy="none",
         )
-
-        assert len(loggers) == 2
-        assert "module1" in loggers
-        assert "module2" in loggers
-        assert all(isinstance(logger, logging.Logger) for logger in loggers.values())
+        assert set(loggers) == {"api", "db"}
+        assert all(isinstance(v, logging.Logger) for v in loggers.values())
 
 
-class TestIntegration:
-    """Integration tests for logger and manager."""
+class TestGlobalAPI:
+    """Test the initialize/get_logger/get_progress/reset API."""
 
-    def test_advanced_logger_with_file(self):
-        """Test AdvancedLogger with file output."""
-        import tempfile
-        from pathlib import Path
+    def teardown_method(self):
+        from advlog import reset
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            log_file = Path(tmpdir) / "test.log"
-            logger = AdvancedLogger(
-                LoggerConfig(
-                    name="TestLogger",
-                    log_file=str(log_file),
-                    console_output=False,
-                )
-            ).get_logger()
+        reset()
 
-            logger.info("Test message")
+    def test_get_logger_auto_initializes(self):
+        """get_logger works without explicit initialize()."""
+        from advlog import get_logger
 
-            assert log_file.exists(), "Log file should be created"
-            with open(log_file) as f:
-                content = f.read()
-                assert "Test message" in content
+        log = get_logger("test.auto")
+        assert isinstance(log, logging.Logger)
 
-    def test_multiple_loggers_separate_files(self):
-        """Test multiple loggers writing to separate files."""
-        import tempfile
-        from pathlib import Path
+    def test_get_logger_returns_same_instance(self):
+        """get_logger returns the same logger for the same name."""
+        from advlog import get_logger
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            logger1 = AdvancedLogger(
-                LoggerConfig(
-                    name="Logger1",
-                    log_file=str(Path(tmpdir) / "logger1.log"),
-                    console_output=False,
-                )
-            ).get_logger()
+        l1 = get_logger("test.same")
+        l2 = get_logger("test.same")
+        assert l1 is l2
 
-            logger2 = AdvancedLogger(
-                LoggerConfig(
-                    name="Logger2",
-                    log_file=str(Path(tmpdir) / "logger2.log"),
-                    console_output=False,
-                )
-            ).get_logger()
+    def test_initialize_with_file(self):
+        """initialize() configures file logging."""
+        from advlog import get_logger, initialize, reset
 
-            logger1.info("Message from logger 1")
-            logger2.info("Message from logger 2")
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            initialize(output_dir=tmpdir, session_name="test_session", file_mode="w")
+            log = get_logger("init_test")
+            log.info("initialized message")
+            for h in log.handlers:
+                h.flush()
+            # Find the log file
+            log_files = list(Path(tmpdir).rglob("*.log"))
+            assert len(log_files) >= 1
+            content = log_files[0].read_text()
+            assert "initialized message" in content
+            # Close all handlers before tmpdir cleanup
+            reset()
 
-            assert (Path(tmpdir) / "logger1.log").exists()
-            assert (Path(tmpdir) / "logger2.log").exists()
+    def test_setup_exception_logging(self):
+        """setup_exception_logging installs a custom excepthook."""
+        import sys
 
-            with open(Path(tmpdir) / "logger1.log") as f:
-                assert "Message from logger 1" in f.read()
-                assert "Message from logger 2" not in f.read()
+        from advlog import setup_exception_logging
 
-            with open(Path(tmpdir) / "logger2.log") as f:
-                assert "Message from logger 2" in f.read()
-                assert "Message from logger 1" not in f.read()
+        original = sys.excepthook
+        setup_exception_logging()
+        assert sys.excepthook is not original
+        # Restore
+        sys.excepthook = original
+
+    def test_reset_clears_state(self):
+        """reset() allows re-initialization."""
+        from advlog import get_logger, reset
+
+        get_logger("before_reset")
+        reset()
+        # After reset, get_logger should re-initialize cleanly
+        log = get_logger("after_reset")
+        assert isinstance(log, logging.Logger)

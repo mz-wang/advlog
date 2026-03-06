@@ -181,7 +181,7 @@ class LoggerManager:
 
     def register_logger(
         self,
-        name: str,
+        name: str = "",
         log_level: int = logging.DEBUG,
         file_strategy: str = "separate",
         log_file: str | None = None,
@@ -191,39 +191,62 @@ class LoggerManager:
         """Register a new logger with the manager.
 
         Args:
-            name: Logger name (usually module name)
-            log_level: Logger level
-            file_strategy: "separate" (own file), "merged" (shared), or "none"
-            log_file: Path to log file (for separate strategy)
-            use_console: Whether to output to console
-            config: Optional LoggerConfig for advanced configuration
+            name: Logger name (usually module __name__). Overridden by config.name
+                  if a config is provided.
+            log_level: Logger level. Overridden by config.log_level if config provided.
+            file_strategy: \"separate\" (own file), \"merged\" (shared), or \"none\".
+                  When using config, \"separate\" is inferred automatically if
+                  config.log_file is set.
+            log_file: Path to log file (for separate strategy). Overridden by
+                      config.log_file if config provided.
+            use_console: Whether to output to console. Overridden by
+                         config.console_output if config provided.
+            config: Optional LoggerConfig for per-logger overrides. When provided,
+                    fields in config take precedence over the flat keyword arguments.
 
         Returns:
             Configured logging.Logger instance
 
         Example:
-            # Separate file, shared console
+            # Simple merged usage (share the manager's shared file)
+            logger = manager.register_logger("mymodule", file_strategy="merged")
+
+            # Separate file
             logger = manager.register_logger(
                 "mymodule",
                 file_strategy="separate",
-                log_file="logs/mymodule.log"
+                log_file="logs/mymodule.log",
             )
 
-            # Merged file, shared console
+            # Advanced per-logger config
+            from advlog import LoggerConfig
             logger = manager.register_logger(
-                "another",
-                file_strategy="merged"
-            )
-
-            # No file, console only
-            logger = manager.register_logger(
-                "console_only",
-                file_strategy="none"
+                config=LoggerConfig(
+                    name="mymodule",
+                    log_file="logs/mymodule.log",
+                    log_level="DEBUG",
+                    show_location=True,
+                )
             )
         """
+        # Resolve effective values from config (if provided)
+        if config is not None:
+            name = config.name
+            log_level = config.get_log_level()
+            use_console = config.console_output
+            if config.log_file:
+                log_file = config.log_file
+                file_strategy = "separate"
+
+        if not name:
+            raise ValueError("Logger name must be provided either via 'name' or 'config.name'")
+
         # Return existing logger if already registered
         if name in self.loggers:
             return self.loggers[name]
+
+        # Determine show_location per logger (config overrides manager default)
+        effective_show_location = config.show_location if config is not None else self.show_location
 
         # Store logger metadata for potential re-initialization
         self._logger_strategies[name] = {
@@ -234,7 +257,7 @@ class LoggerManager:
         # Create logger
         logger = logging.getLogger(name)
         logger.setLevel(log_level)
-        logger.propagate = False
+        logger.propagate = config.propagate if config is not None else False
 
         # Clear any existing handlers
         logger.handlers.clear()
@@ -243,11 +266,10 @@ class LoggerManager:
         if use_console and self.shared_console and self._console_handler:
             logger.addHandler(self._console_handler)
         elif use_console and not self.shared_console:
-            # Create individual console handler
             console_handler = create_console_handler(
                 use_color=self.use_color,
                 log_level=self.console_log_level,
-                show_location=self.show_location,
+                show_location=effective_show_location,
             )
             logger.addHandler(console_handler)
 
@@ -255,9 +277,9 @@ class LoggerManager:
         if file_strategy == "separate" and log_file:
             file_handler = create_file_handler(
                 log_file=log_file,
-                mode="a",
+                mode=config.file_mode if config is not None else "a",
                 log_level=self.file_log_level,
-                show_location=self.show_location,
+                show_location=effective_show_location,
             )
             logger.addHandler(file_handler)
         elif file_strategy == "merged" and self._shared_file_handler:

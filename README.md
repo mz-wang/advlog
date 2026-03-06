@@ -1,231 +1,239 @@
-# advlog-core
+﻿# advlog
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-brightgreen)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.2-brightgreen)](CHANGELOG.md)
 
-A powerful, feature-rich logging library for Python with beautiful terminal output, flexible configuration, and extensive plugin support.
+A Python logging library with colored terminal output, file management, progress tracking, and ML training utilities, built on top of [Rich](https://github.com/Textualize/rich).
 
-## ✨ Features
+> **Personal project notice:** This package was written for personal development use. Update frequency and feature scope may be limited. Contributions and suggestions are welcome.
 
-- **🎨 Rich Console Output** - Beautiful colored terminal logging with Rich library
-- **📊 Progress Tracking** - Integrated progress bars with automatic management
-- **🔧 Flexible Configuration** - Easy-to-use configuration system based on dataclasses
-- **📁 Smart File Management** - Log rotation, intelligent naming, and multiple file strategies
-- **🎯 Multi-Module Coordination** - LoggerManager for unified logging across modules
-- **🔍 Source Information** - Automatic display of log origin (file, line, function)
-- **📐 Aligned Formatting** - Precise control over field width and alignment
-- **🌍 Environment Adaptive** - Automatic detection and adaptation to different environments
-- **🚀 ML/AI Ready** - Built-in support for machine learning training logs
+## Features
 
-## 📦 Installation
+- **Rich Console Output** — Colored terminal logging via the Rich library
+- **Flexible Configuration** — `LoggerConfig` dataclass for per-logger overrides; simple `initialize()` / `get_logger()` API for common cases
+- **File Logging** — Separate or merged file strategies with configurable rotation
+- **Progress Tracking** — Integrated progress bars via `ProgressTracker`
+- **Multi-Module Coordination** — `LoggerManager` for consistent logging across modules
+- **ML/Training Utilities** — `TrainingLogger` plugin for experiment logging
+- **Smart File Naming** — Timestamped, daily, and incremental log file naming
 
-Install from PyPI:
+## Installation
 
 ```bash
 pip install advlog-core
 ```
 
-Install with all optional features:
+With all optional features:
 
 ```bash
 pip install "advlog-core[all]"
 ```
 
-> **Note:** The PyPI package name is `advlog-core`, but when importing in Python, use `import advlog`.
+> The PyPI package name is `advlog-core`; import as `import advlog`.
 
-## 🚀 Quick Start
+## Quick Start
 
-### Basic Usage
+### One-liner
 
 ```python
 from advlog import get_logger
 
-# Create a logger for the current module
 log = get_logger(__name__)
-
-# Use the logger
 log.info("Application started")
 log.warning("High memory usage detected")
 log.error("Database connection failed")
 ```
 
-### Initialize Logging System
+### Initialize once, use everywhere
 
 ```python
 from advlog import initialize, get_logger, get_progress
 
-# Initialize the logging system
 initialize(
     output_dir="./logs",
     session_name="myapp",
     log_level="DEBUG",
-    show_location=True
+    show_location=True,
 )
 
-# Get logger and progress tracker
 log = get_logger(__name__)
-progress = get_progress()
+log.info("Initialized")
 
-# Use in a workflow
+progress = get_progress()
 with progress:
     task = progress.add_task("Processing", total=100)
     for i in range(100):
-        # Do work
         progress.update(task, advance=1)
 ```
 
-## 🏗️ Real-World Example
-
-For a complete multi-module application example, see [`examples/real_world_demo/`](examples/real_world_demo/). This demonstrates:
-
-1. **Global logging initialization** - Set up logging once at application start
-2. **Cross-module logging** - Share loggers across multiple Python files
-3. **Progress tracking** - Track long-running workflows
-4. **Error handling** - Comprehensive error logging
-5. **File management** - Organized log file structure
-
-Run it:
-
-```bash
-python -m examples.real_world_demo.main
-```
-
-## 📋 Advanced Usage
-
-### Multiple Loggers with Manager
+### Per-logger configuration with `LoggerConfig`
 
 ```python
-from advlog import LoggerManager, get_logger
+from advlog import LoggerManager, LoggerConfig
 
-# Create a logger manager for coordinated logging
-manager = LoggerManager(shared_console=True)
+manager = LoggerManager(shared_console=True, shared_file="logs/app.log")
 
-# Register loggers for different modules
+# Default registration
 api_logger = manager.register_logger("api")
-db_logger = manager.register_logger("database", log_level="DEBUG")
-auth_logger = manager.register_logger("auth")
 
-# Use them
+# Override with LoggerConfig
+db_logger = manager.register_logger(config=LoggerConfig(
+    name="database",
+    log_level="DEBUG",
+    log_file="logs/db.log",
+    show_location=True,
+))
+
 api_logger.info("API server started")
-db_logger.debug("Executing query")
-auth_logger.warning("Invalid login attempt")
+db_logger.debug("Executing query: SELECT ...")
 ```
 
-### Smart File Naming
+### Register a group of loggers at once
+
+```python
+from advlog import create_logger_group
+
+loggers = create_logger_group(
+    ["api", "database", "auth"],
+    shared_console=True,
+    file_strategy="merged",
+)
+
+loggers["api"].info("Request received")
+loggers["database"].debug("Query executed")
+loggers["auth"].warning("Invalid login attempt")
+```
+
+## Formatters
+
+Four formatters are available:
+
+| Class | Description |
+|---|---|
+| `RichColorFormatter` | Wraps messages in Rich color markup by log level |
+| `PlainFormatter` | Plain text, no color codes |
+| `IndentedFormatter` | Indents continuation lines of multi-line messages |
+| `JSONFormatter` | Outputs each record as a JSON object |
+
+```python
+from advlog import JSONFormatter
+import logging
+
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
+logging.getLogger("myapp").addHandler(handler)
+```
+
+## File Logging
+
+```python
+from advlog import create_file_handler
+
+handler = create_file_handler(
+    log_file="logs/app.log",
+    file_mode="a",
+    show_location=True,
+)
+```
+
+### Smart log file naming
 
 ```python
 from advlog import LogNamingStrategy
 
-# Timestamp-based naming
-log_file = LogNamingStrategy.timestamped("app", suffix="production")
-# Result: logs/2026-01-05/20260105_143022_app_production.log
+# Timestamp-based:  logs/2026-03-06/20260306_143022_app_prod.log
+log_file = LogNamingStrategy.timestamped("app", suffix="prod")
 
-# Daily directory structure
+# Daily directory:  logs/2026-03-06/myapp_errors.log
 log_file = LogNamingStrategy.daily("myapp", suffix="errors")
-# Result: logs/2026-01-05/myapp_errors.log
 
-# Incremental naming (avoids conflicts)
+# Incremental (no conflicts):  logs/backup_data.log  →  backup_data_1.log ...
 log_file = LogNamingStrategy.incremental("backup", suffix="data")
-# Result: logs/backup_data.log (or backup_data_1.log if exists)
 ```
 
-### Progress Tracking
+## Progress Tracking
 
 ```python
 from advlog import ProgressTracker
 
 with ProgressTracker() as progress:
-    # Add multiple tasks
-    download_task = progress.add_task("Downloading files", total=100)
-    process_task = progress.add_task("Processing data", total=50)
+    download = progress.add_task("Downloading", total=100)
+    process  = progress.add_task("Processing",  total=50)
 
-    # Update progress
-    for i in range(100):
-        # Download file
-        progress.update(download_task, advance=1)
+    for _ in range(100):
+        progress.update(download, advance=1)
 
-    for i in range(50):
-        # Process data
-        progress.update(process_task, advance=1)
+    for _ in range(50):
+        progress.update(process, advance=1)
 ```
 
-### ML Training Logger
+## ML Training Utilities
 
 ```python
-from advlog import AdvancedLogger, TrainingLogger
+from advlog import TrainingLogger
+import logging
 
-# Create logger
-logger = AdvancedLogger().get_logger()
-
-# Create training logger
+logger = logging.getLogger(__name__)
 trainer = TrainingLogger(logger)
 
-# Log training step
 trainer.log_train_step(
     epoch=1,
     total_epochs=10,
     batch=100,
     total_batches=1000,
-    loss_dict={"loss": 0.5, "accuracy": 0.85},
-    learning_rate=0.001,
-    time_elapsed=45.2
+    loss_dict={"loss": 0.4231, "accuracy": 0.872},
+    learning_rate=1e-3,
+    time_elapsed=45.2,
 )
 ```
 
-## 🛠️ Dependencies
+## Exception Logging
 
-This project is built to be lightweight. While the core functionality requires minimal setup, certain features are enabled only when optional dependencies are installed.
+```python
+from advlog import setup_exception_logging
 
-### Required
-These are necessary for the basic operation of advlog-core:
-
-- **Rich** (MIT License): Used for beautiful terminal formatting and logging.
-
-### Optional
-Install these based on your specific use case:
-
-- **OmegaConf** (BSD-3-Clause): Required for advanced configuration file parsing.
-- **torchinfo** (MIT License): Required for model structure visualization.
-- **Accelerate** (Apache-2.0): Required for distributed training and multi-GPU logging support.
-
-### Installation
-
-You can install the core package with:
-
-```bash
-pip install advlog-core
+# Install a sys.excepthook that logs all uncaught exceptions
+setup_exception_logging()
 ```
 
-To include all optional features, you can use the extra tag:
+## Real-World Example
+
+See [`examples/real_world_demo/`](examples/real_world_demo/) for a complete multi-module application demonstrating global initialization, cross-module loggers, progress tracking, error handling, and organized file output.
 
 ```bash
-pip install "advlog-core[all]"
+python -m examples.real_world_demo.main
 ```
 
-Or install specific optional dependencies:
+## Dependencies
+
+**Required**
+
+- [Rich](https://github.com/Textualize/rich) — Terminal formatting and colored output
+
+**Optional**
+
+| Extra tag | Package | Feature |
+|---|---|---|
+| `config` | `omegaconf` | Advanced config file parsing |
+| `torch` | `torchinfo` | Model structure visualization |
+| `distributed` | `accelerate` | Distributed/multi-GPU training support |
 
 ```bash
-pip install "advlog-core[config]"      # For OmegaConf support
-pip install "advlog-core[torch]"       # For torchinfo support
-pip install "advlog-core[distributed]" # For Accelerate support
+pip install "advlog-core[config]"
+pip install "advlog-core[torch]"
+pip install "advlog-core[distributed]"
 ```
 
-## 📖 Documentation
+## Contributing
 
-- **Examples**: See the [`examples/`](examples/) directory for various use cases
-- **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for version history
-- **API Reference**: Browse the source code in [`src/advlog/`](src/advlog/)
+Contributions are welcome — please feel free to open an issue or submit a pull request.
 
-## 🤝 Contributing
+## License
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Apache License 2.0 — see [LICENSE](LICENSE) for details.
 
-## 📄 License
+## Acknowledgments
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Rich](https://github.com/Textualize/rich) - For the amazing terminal formatting library
-- [Python Logging](https://docs.python.org/3/library/logging.html) - For the logging infrastructure
+- [Rich](https://github.com/Textualize/rich) for the terminal formatting library
+- [Python logging](https://docs.python.org/3/library/logging.html) for the logging infrastructure

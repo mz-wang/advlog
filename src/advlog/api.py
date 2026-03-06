@@ -32,7 +32,6 @@ Usage:
     progress = get_progress()
 """
 
-import importlib.util
 import logging
 import os
 import sys
@@ -41,23 +40,11 @@ from advlog.core import LoggerManager
 from advlog.plugins import ProgressTracker
 from advlog.utils import LogNamingStrategy
 
-RICH_AVAILABLE = importlib.util.find_spec("rich") is not None
-
 # Global singleton instances
 _LOGGER_MANAGER: LoggerManager | None = None
 _PROGRESS_TRACKER: ProgressTracker | None = None
 _INITIALIZED: bool = False
 _INIT_CONFIG: dict = {}
-
-
-def _should_force_terminal_width() -> bool:
-    """
-    Determine if we should force a wide console for file output.
-
-    Returns True when output is being redirected to a file (non-interactive),
-    so Rich uses a wide width instead of narrow terminal detection.
-    """
-    return not sys.stdout.isatty()
 
 
 def initialize(
@@ -274,10 +261,33 @@ def reset():
     _INIT_CONFIG = {}
 
 
+def setup_exception_logging(logger: logging.Logger | None = None) -> None:
+    """Install a global handler to log uncaught exceptions.
+
+    Args:
+        logger: Logger to use. Defaults to ``logging.getLogger("advlog")``.
+
+    Example:
+        >>> from advlog import setup_exception_logging
+        >>> setup_exception_logging()
+    """
+    if logger is None:
+        logger = logging.getLogger("advlog")
+
+    def _log_uncaught(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+        else:
+            logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_tb))
+
+    sys.excepthook = _log_uncaught
+
+
 # Export public API
 __all__ = [
     "initialize",
     "get_logger",
     "get_progress",
     "reset",
+    "setup_exception_logging",
 ]
