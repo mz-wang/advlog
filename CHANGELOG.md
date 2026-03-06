@@ -1,3 +1,13 @@
+## v0.2.0 (2026-03-06)
+
+### BREAKING CHANGE
+
+- AdvancedLogger class has been removed. Use LoggerManager and global initialize()/get_logger() functions instead. Removed AlignedFormatter, TableFormatter, CompactFormatter, and ColumnFormatter. Simplified to RichColorFormatter, PlainFormatter, IndentedFormatter, and JSONFormatter only.
+
+### Refactor
+
+- **core**: remove AdvancedLogger class and simplify API
+
 ## v0.1.2 (2026-02-27)
 
 ### Fix
