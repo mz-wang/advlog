@@ -1,3 +1,9 @@
+## v0.2.1 (2026-07-21)
+
+### Fix
+
+- **api**: make implicit auto-init console-only to avoid stray log file
+
 ## v0.2.0 (2026-03-06)
 
 ### BREAKING CHANGE

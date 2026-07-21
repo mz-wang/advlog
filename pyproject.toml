@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "advlog-core"
-version = "0.2.0"
+version = "0.2.1"
 description = "Advanced logging library with Rich features, progress tracking, and ML training utilities"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -120,7 +120,7 @@ exclude_lines = [
 name = "cz_conventional_commits"
 tag_format = "v$version"
 version_scheme = "pep440"
-version = "0.2.0"
+version = "0.2.1"
 update_changelog_on_bump = true
 major_version_zero = true
 version_files = [
