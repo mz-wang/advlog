@@ -119,6 +119,7 @@ exclude_lines = [
 [tool.commitizen]
 name = "cz_conventional_commits"
 tag_format = "v$version"
+annotated_tag = true
 version_scheme = "pep440"
 version = "0.2.1"
 update_changelog_on_bump = true
