@@ -66,8 +66,10 @@ class FileHandler:
         if log_file:
             ensure_dir(log_file)
 
-        # Create handler
-        handler = logging.FileHandler(log_file, mode=mode, encoding=encoding)
+        # Create handler. delay=True defers opening (and creating) the file
+        # until the first record is emitted, so a handler that never receives a
+        # record leaves no empty file behind.
+        handler = logging.FileHandler(log_file, mode=mode, encoding=encoding, delay=True)
 
         # Choose formatter
         if use_json_format:

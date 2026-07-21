@@ -171,7 +171,11 @@ def get_logger(name: str, log_level: str | None = None) -> logging.Logger:
     """
     Get or create a logger for a specific module.
 
-    Auto-initializes the global logging system if not already done.
+    Auto-initializes the global logging system if not already done. This
+    implicit initialization is console-only; no log file is created until
+    initialize() is called explicitly. This avoids creating a stray log file
+    in the current working directory before the application has configured its
+    output location.
 
     Args:
         name: Name of the module (typically __name__)
@@ -187,9 +191,14 @@ def get_logger(name: str, log_level: str | None = None) -> logging.Logger:
     """
     global _LOGGER_MANAGER, _INITIALIZED
 
-    # Auto-initialize if not done
+    # Auto-initialize if not done.
+    # Implicit auto-init is console-only: at this point the application has not
+    # yet told us where log files should live, so writing one into the current
+    # working directory (the project root) would be wrong. File logging is
+    # enabled later, when the application calls initialize() explicitly, which
+    # re-attaches a shared file handler to loggers registered during this phase.
     if not _INITIALIZED:
-        initialize()
+        initialize(enable_file_logging=False)
 
     # Convert log level if provided
     level_int = None
