@@ -21,6 +21,10 @@ from logging.handlers import RotatingFileHandler as StdRotatingFileHandler
 from advlog.utils.path import ensure_dir
 
 FILE_FORMATS = ("text", "json", "both")
+DEFAULT_LOG_FORMAT = "%(asctime)s |%(levelname)-8s| %(message)s"
+DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+_LOCATION = "[%(filename)s:%(lineno)d:%(funcName)s]"
 
 
 def _build_formatter(
@@ -30,6 +34,7 @@ def _build_formatter(
     indent_size: int,
     date_format: str,
     log_format: str,
+    strip_markup: bool,
 ) -> logging.Formatter:
     """Choose the formatter for a file handler.
 
@@ -40,6 +45,7 @@ def _build_formatter(
         indent_size: Indentation size for continuation lines
         date_format: Date format string
         log_format: Log message format string
+        strip_markup: Remove paired Rich style tags from messages
 
     Returns:
         Configured formatter
@@ -48,19 +54,27 @@ def _build_formatter(
     from advlog.core.formatter import IndentedFormatter, JSONFormatter, PlainFormatter
 
     if use_json_format:
-        return JSONFormatter()
+        return JSONFormatter(strip_markup=strip_markup)
 
     if show_location and use_indented_format:
-        location_fmt = "%(asctime)s |%(levelname)-8s| [%(filename)s:%(lineno)d:%(funcName)s] %(message)s"
-        return IndentedFormatter(fmt=location_fmt, datefmt=date_format, indent_size=indent_size)
+        # Location goes right before the message; appended if the format has no message field
+        if "%(message)s" in log_format:
+            location_fmt = log_format.replace("%(message)s", f"{_LOCATION} %(message)s")
+        else:
+            location_fmt = f"{log_format} {_LOCATION}"
+        return IndentedFormatter(
+            fmt=location_fmt, datefmt=date_format, indent_size=indent_size, strip_markup=strip_markup
+        )
 
     if use_indented_format:
-        return IndentedFormatter(fmt=log_format, datefmt=date_format, indent_size=indent_size)
+        return IndentedFormatter(
+            fmt=log_format, datefmt=date_format, indent_size=indent_size, strip_markup=strip_markup
+        )
 
     if show_location:
-        return PlainFormatter(fmt=f"{log_format} [%(filename)s:%(lineno)d:%(funcName)s]", datefmt=date_format)
+        return PlainFormatter(fmt=f"{log_format} {_LOCATION}", datefmt=date_format, strip_markup=strip_markup)
 
-    return PlainFormatter(fmt=log_format, datefmt=date_format)
+    return PlainFormatter(fmt=log_format, datefmt=date_format, strip_markup=strip_markup)
 
 
 class FileHandler:
@@ -80,9 +94,10 @@ class FileHandler:
         show_location: bool = False,
         location_width: int = 50,
         indent_size: int = 27,
-        date_format: str = "%Y-%m-%d %H:%M:%S",
-        log_format: str = "%(asctime)s |%(levelname)-8s| %(message)s",
+        date_format: str = DEFAULT_DATE_FORMAT,
+        log_format: str = DEFAULT_LOG_FORMAT,
         use_json_format: bool = False,
+        strip_markup: bool = True,
     ) -> logging.Handler:
         """Create a file handler.
 
@@ -98,6 +113,8 @@ class FileHandler:
             date_format: Date format string
             log_format: Log message format string
             use_json_format: Output logs as JSON instead
+            strip_markup: Remove paired Rich style tags (``[bold]..[/bold]``)
+                          so the file holds the text the console displays
 
         Returns:
             Configured file handler
@@ -118,6 +135,7 @@ class FileHandler:
             indent_size=indent_size,
             date_format=date_format,
             log_format=log_format,
+            strip_markup=strip_markup,
         )
 
         handler.setFormatter(formatter)
@@ -144,9 +162,10 @@ class RotatingFileHandler:
         show_location: bool = False,
         location_width: int = 50,
         indent_size: int = 27,
-        date_format: str = "%Y-%m-%d %H:%M:%S",
+        date_format: str = DEFAULT_DATE_FORMAT,
         log_format: str = "%(asctime)s [%(levelname)s] %(message)s",
         use_json_format: bool = False,
+        strip_markup: bool = True,
     ) -> logging.Handler:
         """Create a rotating file handler.
 
@@ -163,6 +182,8 @@ class RotatingFileHandler:
             date_format: Date format string
             log_format: Log message format string
             use_json_format: Output logs as JSON instead
+            strip_markup: Remove paired Rich style tags (``[bold]..[/bold]``)
+                          so the file holds the text the console displays
 
         Returns:
             Configured rotating file handler
@@ -180,6 +201,7 @@ class RotatingFileHandler:
             indent_size=indent_size,
             date_format=date_format,
             log_format=log_format,
+            strip_markup=strip_markup,
         )
 
         handler.setFormatter(formatter)

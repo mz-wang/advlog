@@ -259,6 +259,179 @@ class TestCreateFileHandlers:
                 h.close()
 
 
+class TestReinitialize:
+    """Test that re-initializing applies the new settings in full."""
+
+    def test_dropping_shared_file_stops_file_output(self):
+        """Re-initializing without a shared file detaches and closes the old one."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            manager = LoggerManager(shared_console=False, shared_file=str(shared), file_format="both")
+            log = manager.register_logger("reinit_drop", file_strategy="merged", use_console=False)
+            old_handlers = list(log.handlers)
+            log.info("before")
+
+            LoggerManager(shared_console=False)
+            log.info("after")
+
+            assert log.handlers == []
+            assert all(h.stream is None for h in old_handlers)  # closed
+            assert "after" not in shared.read_text()
+            assert len(_read_jsonl(shared.with_suffix(".jsonl"))) == 1
+
+    def test_use_color_controls_shared_console(self):
+        """use_color=False turns color off on the shared console (and back on)."""
+        from advlog.utils.console import get_shared_console
+
+        try:
+            LoggerManager(use_color=False)
+            assert get_shared_console().no_color is True
+            LoggerManager(use_color=True)
+            assert get_shared_console().no_color is False
+        finally:
+            get_shared_console().no_color = False
+
+
+class TestFileContent:
+    """Test what ends up in the files (as opposed to on the console)."""
+
+    def test_rich_markup_stripped_from_files(self):
+        """Paired Rich tags are removed from text and JSON files; other brackets stay."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            manager = LoggerManager(shared_console=False, shared_file=str(shared), file_format="both")
+            log = manager.register_logger("content_markup", file_strategy="merged", use_console=False)
+            log.info("[bold red]alert[/bold red] at arr[i] [1/3]")
+            LoggerManager.reset()
+
+            assert shared.read_text().rstrip().endswith("| alert at arr[i] [1/3]")
+            assert _read_jsonl(shared.with_suffix(".jsonl"))[0]["message"] == "alert at arr[i] [1/3]"
+
+
+class TestLoggerConfigFields:
+    """Test that every LoggerConfig field has an effect."""
+
+    def test_file_format_fields_applied(self):
+        """log_format, date_format and encoding shape the logger's own file."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = Path(tmpdir) / "mod.log"
+            config = LoggerConfig(
+                name="cfg_format",
+                log_file=str(log_file),
+                console_output=False,
+                log_format="%(asctime)s <%(levelname)s> %(message)s",
+                date_format="%Y",
+                encoding="utf-16",
+            )
+            manager = LoggerManager(shared_console=False)
+            manager.register_logger(config=config).info("héllo")
+            LoggerManager.reset()
+
+            line = log_file.read_text(encoding="utf-16").strip()
+            year, rest = line.split(" ", 1)
+            assert len(year) == 4 and year.isdigit()
+            assert rest == "<INFO> héllo"
+
+    def test_log_format_kept_with_show_location(self):
+        """show_location inserts the location into a custom log_format instead of replacing it."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = Path(tmpdir) / "mod.log"
+            config = LoggerConfig(
+                name="cfg_location",
+                log_file=str(log_file),
+                console_output=False,
+                show_location=True,
+                log_format="<%(levelname)s> %(message)s",
+            )
+            manager = LoggerManager(shared_console=False)
+            manager.register_logger(config=config).info("located")
+            LoggerManager.reset()
+
+            line = log_file.read_text().strip()
+            assert line.startswith("<INFO> [test_logger.py:")
+            assert line.endswith(":test_log_format_kept_with_show_location] located")
+
+    def test_default_format_unchanged(self):
+        """A config without format overrides writes the same line as no config."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            with_config = Path(tmpdir) / "a.log"
+            without_config = Path(tmpdir) / "b.log"
+            manager = LoggerManager(shared_console=False)
+            manager.register_logger(
+                config=LoggerConfig(name="cfg_default_a", log_file=str(with_config), console_output=False)
+            ).info("same")
+            manager.register_logger(
+                "cfg_default_b", file_strategy="separate", log_file=str(without_config), use_console=False
+            ).info("same")
+            LoggerManager.reset()
+
+            assert "|INFO    | same" in with_config.read_text()
+            assert with_config.read_text()[19:] == without_config.read_text()[19:]
+
+    def test_console_fields_applied_without_shared_console(self):
+        """use_color and enable_rich_tracebacks configure the logger's own console handler."""
+        from advlog.utils.console import get_shared_console
+
+        manager = LoggerManager(shared_console=False)
+        plain = manager.register_logger("cfg_console_default", file_strategy="none").handlers[0]
+        assert plain.console is get_shared_console()
+        assert plain.rich_tracebacks is True
+
+        config = LoggerConfig(name="cfg_console", use_color=False, enable_rich_tracebacks=False)
+        handler = manager.register_logger(config=config).handlers[0]
+        assert handler.console is not get_shared_console()
+        assert handler.console.no_color is True
+        assert handler.rich_tracebacks is False
+
+    def test_use_accelerate_silences_non_main_process(self, monkeypatch):
+        """use_accelerate drops records once accelerate reports a non-main process."""
+        import sys
+        import types
+
+        class FakePartialState:
+            _shared_state: dict = {}
+            is_main_process = True
+
+        fake_module = types.ModuleType("accelerate.state")
+        fake_module.PartialState = FakePartialState
+        monkeypatch.setitem(sys.modules, "accelerate.state", fake_module)
+
+        manager = LoggerManager(shared_console=False)
+        log = manager.register_logger(
+            config=LoggerConfig(name="cfg_accelerate", console_output=False, use_accelerate=True)
+        )
+        other = manager.register_logger("cfg_no_accelerate", file_strategy="none", use_console=False)
+        seen = []
+        handler = logging.Handler()
+        handler.emit = lambda record: seen.append(record.getMessage())
+        log.addHandler(handler)
+        other.addHandler(handler)
+
+        log.info("accelerate not initialized")
+        FakePartialState._shared_state = {"initialized": True}
+        log.info("main process")
+        FakePartialState.is_main_process = False
+        log.info("worker process")
+        other.info("logger without use_accelerate")
+
+        assert seen == ["accelerate not initialized", "main process", "logger without use_accelerate"]
+
+    def test_to_dict_round_trip(self):
+        """to_dict() carries every field, so from_dict() rebuilds an equal config."""
+        config = LoggerConfig(
+            name="cfg_round_trip",
+            log_file="logs/x.log",
+            file_format="both",
+            use_color=False,
+            log_format="%(message)s",
+            date_format="%H:%M",
+            encoding="latin-1",
+            enable_rich_tracebacks=False,
+            use_accelerate=True,
+        )
+        assert LoggerConfig.from_dict(config.to_dict()) == config
+
+
 class TestCreateLoggerGroup:
     """Test create_logger_group convenience function."""
 
@@ -332,6 +505,62 @@ class TestGlobalAPI:
             assert jsonl_files[0].stem == log_files[0].stem
             records = _read_jsonl(jsonl_files[0])
             assert records[0]["extra"]["params"] == {"lr": 0.001, "batch_size": 32}
+
+    def test_disabling_file_logging_stops_writing(self):
+        """initialize(enable_file_logging=False) detaches the log file set up earlier."""
+        from advlog import get_logger, initialize, reset
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = Path(tmpdir) / "run.log"
+            initialize(log_file_path=str(log_file), file_mode="w")
+            log = get_logger("init_disable")
+            log.warning("before")
+            initialize(enable_file_logging=False)
+            log.warning("after")
+            reset()
+
+            content = log_file.read_text()
+            assert "before" in content
+            assert "after" not in content
+
+    def test_get_logger_applies_level_to_existing_logger(self):
+        """An explicit log_level changes the level of an already-registered logger."""
+        from advlog import get_logger
+
+        log = get_logger("level.override")
+        assert log.level == logging.DEBUG
+        assert get_logger("level.override", log_level="ERROR") is log
+        assert log.level == logging.ERROR
+        # No level given: left as is
+        get_logger("level.override")
+        assert log.level == logging.ERROR
+
+    def test_uncaught_exception_reaches_log_file(self):
+        """The default exception hook logs through the managed logger, into the file."""
+        import sys
+
+        from advlog import initialize, reset, setup_exception_logging
+
+        original = sys.excepthook
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = Path(tmpdir) / "run.log"
+            initialize(log_file_path=str(log_file), file_format="both")
+            try:
+                setup_exception_logging()
+                try:
+                    raise RuntimeError("nobody caught this")
+                except RuntimeError:
+                    sys.excepthook(*sys.exc_info())
+            finally:
+                sys.excepthook = original
+            reset()
+
+            content = log_file.read_text()
+            assert "Uncaught exception" in content
+            assert "RuntimeError: nobody caught this" in content
+            record = _read_jsonl(log_file.with_suffix(".jsonl"))[0]
+            assert record["level"] == "ERROR"
+            assert "RuntimeError: nobody caught this" in record["exception"]
 
     def test_setup_exception_logging(self):
         """setup_exception_logging installs a custom excepthook."""

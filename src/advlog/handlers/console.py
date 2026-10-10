@@ -62,7 +62,8 @@ class ConsoleHandler:
         """Create a console handler.
 
         Args:
-            use_color: Enable colored output
+            use_color: Enable colored output. Only consulted when no console
+                       is passed; a passed console keeps its own color setting.
             use_rich: Use Rich library if available
             log_level: Minimum log level to handle
             show_location: Show source location (file:line) in Rich sidebar
@@ -77,7 +78,9 @@ class ConsoleHandler:
         # Use Rich handler if available and requested
         if use_rich and RICH_AVAILABLE:
             if console is None:
-                console = get_shared_console()
+                # The shared console's color setting is global, so a
+                # colorless handler gets a console of its own
+                console = get_shared_console() if use_color else Console(file=sys.stderr, no_color=True)
 
             # Use IndentedRichHandler (wrapper around RichHandler) with native time format [yy/mm/dd hh:mm:ss]
             handler = IndentedRichHandler(

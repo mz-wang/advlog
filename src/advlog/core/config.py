@@ -15,8 +15,10 @@
 """Configuration management for the logging system."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
+
+from advlog.handlers.file import DEFAULT_DATE_FORMAT, DEFAULT_LOG_FORMAT
 
 
 @dataclass
@@ -34,15 +36,23 @@ class LoggerConfig:
         file_mode: File opening mode ('w' for overwrite, 'a' for append)
         file_format: "text", "json" (JSON Lines), or "both". None inherits
                      the manager's setting.
-        use_color: Enable colored console output
+        use_color: Enable colored console output. Applies only when the
+                   manager does not use a shared console (a shared console
+                   has one color setting for everyone).
         console_output: Enable console output
-        enable_rich_tracebacks: Enable rich formatted tracebacks
+        enable_rich_tracebacks: Enable rich formatted tracebacks. Applies only
+                                when the manager does not use a shared console.
         show_location: Show source file/line in console sidebar
-        date_format: Date format string for file log messages
-        log_format: Format string for file log messages
-        encoding: File encoding
+        date_format: Date format string for this logger's own log file
+        log_format: Format string for this logger's own log file
+        encoding: Encoding of this logger's own log file
         propagate: Whether log records propagate to the root logger
-        use_accelerate: Suppress output on non-main processes (distributed training)
+        use_accelerate: Suppress output on non-main processes of an
+                        ``accelerate`` run (distributed training)
+
+    The file settings (``file_mode``, ``file_format``, ``date_format``,
+    ``log_format``, ``encoding``) apply to the file named by ``log_file``;
+    without ``log_file`` the logger has no file of its own.
 
     Example:
         config = LoggerConfig(
@@ -68,8 +78,8 @@ class LoggerConfig:
     show_location: bool = False
 
     # File formatting
-    date_format: str = "%Y-%m-%d %H:%M:%S"
-    log_format: str = "%(asctime)s [%(levelname)s] %(message)s"
+    date_format: str = DEFAULT_DATE_FORMAT
+    log_format: str = DEFAULT_LOG_FORMAT
     encoding: str = "utf-8"
 
     # Misc
@@ -101,17 +111,7 @@ class LoggerConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary."""
-        return {
-            "name": self.name,
-            "log_file": self.log_file,
-            "log_level": self.log_level,
-            "file_mode": self.file_mode,
-            "file_format": self.file_format,
-            "use_color": self.use_color,
-            "console_output": self.console_output,
-            "show_location": self.show_location,
-            "propagate": self.propagate,
-        }
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, config_dict: dict[str, Any]) -> "LoggerConfig":

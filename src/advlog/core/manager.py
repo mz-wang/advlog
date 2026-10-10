@@ -16,8 +16,10 @@
 
 import logging
 import threading
+from typing import Any
 
 from advlog.core.config import LoggerConfig
+from advlog.core.filters import MainProcessFilter
 from advlog.handlers.console import create_console_handler
 from advlog.handlers.file import FILE_FORMATS, create_file_handlers
 from advlog.utils.console import get_shared_console
@@ -83,7 +85,9 @@ class LoggerManager:
 
         Supports re-initialization to update global settings mid-run.
         If already initialized, existing loggers will be updated to use
-        the new shared handlers.
+        the new shared handlers. Every call applies the full set of
+        arguments: re-initializing without ``shared_file`` detaches and
+        closes the shared file.
 
         Args:
             shared_console: Whether all loggers share the same console handler
@@ -122,13 +126,21 @@ class LoggerManager:
         self.file_mode = file_mode
         self.file_format = file_format
 
+        # The shared console has a single color setting, used by every
+        # handler (and progress bar) that draws on it
+        if RICH_AVAILABLE:
+            get_shared_console().no_color = not use_color
+
         # Initialize shared console if needed
         if shared_console:
             self._init_shared_console()
 
-        # Initialize shared file if provided
+        # Initialize shared file if provided; otherwise drop the previous one
+        # (_refresh_loggers detaches and closes it)
         if shared_file:
             self._init_shared_file()
+        else:
+            self._shared_file_handlers = []
 
         # If already initialized previously, we need to refresh all existing loggers
         if hasattr(self, "_initialized") and self._initialized:
@@ -271,32 +283,49 @@ class LoggerManager:
         logger.setLevel(log_level)
         logger.propagate = config.propagate if config is not None else False
 
-        # Clear any existing handlers
+        # Clear any existing handlers and filters left by an earlier registration
         logger.handlers.clear()
+        for old_filter in logger.filters[:]:
+            if isinstance(old_filter, MainProcessFilter):
+                logger.removeFilter(old_filter)
+
+        if config is not None and config.use_accelerate:
+            logger.addFilter(MainProcessFilter())
 
         # Add console handler
         if use_console and self.shared_console and self._console_handler:
             logger.addHandler(self._console_handler)
         elif use_console and not self.shared_console:
+            use_color = self.use_color and (config is None or config.use_color)
+            # Same color setting as the manager: draw on the shared console
+            # (keeps progress bars intact). Otherwise the handler makes its own.
+            console = get_shared_console() if RICH_AVAILABLE and use_color == self.use_color else None
             console_handler = create_console_handler(
-                use_color=self.use_color,
+                use_color=use_color,
                 log_level=self.console_log_level,
                 show_location=effective_show_location,
+                enable_rich_tracebacks=config.enable_rich_tracebacks if config is not None else True,
+                console=console,
             )
             logger.addHandler(console_handler)
 
         # Add file handler based on strategy
         if file_strategy == "separate" and log_file:
-            file_format = self.file_format
-            if config is not None and config.file_format is not None:
-                file_format = config.file_format
+            # Per-logger file settings: config wins where it sets a value
+            file_options: dict[str, Any] = {"file_format": self.file_format, "mode": "a"}
+            if config is not None:
+                file_options["mode"] = config.file_mode
+                file_options["encoding"] = config.encoding
+                file_options["date_format"] = config.date_format
+                file_options["log_format"] = config.log_format
+                if config.file_format is not None:
+                    file_options["file_format"] = config.file_format
 
             file_handlers = create_file_handlers(
                 log_file=log_file,
-                file_format=file_format,
-                mode=config.file_mode if config is not None else "a",
                 log_level=self.file_log_level,
                 show_location=effective_show_location,
+                **file_options,
             )
             for file_handler in file_handlers:
                 logger.addHandler(file_handler)

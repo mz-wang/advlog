@@ -67,6 +67,13 @@ with progress:
         progress.update(task, advance=1)
 ```
 
+Things worth knowing:
+
+- Loggers obtained before `initialize()` are console-only; they pick up the log file as soon as `initialize()` runs.
+- Calling `initialize()` again applies the new settings in full to every existing logger. In particular, `enable_file_logging=False` detaches and closes the current log file.
+- `use_color=False` turns color off for everything drawn on the shared console, progress bars included.
+- `get_logger(name, log_level="ERROR")` sets the level even if that logger already exists.
+
 ### Per-logger configuration with `LoggerConfig`
 
 ```python
@@ -88,6 +95,15 @@ db_logger = manager.register_logger(config=LoggerConfig(
 api_logger.info("API server started")
 db_logger.debug("Executing query: SELECT ...")
 ```
+
+`LoggerConfig` fields and where they apply:
+
+| Field | Applies to |
+|---|---|
+| `name`, `log_level`, `propagate`, `console_output`, `show_location` | The logger itself |
+| `log_file`, `file_mode`, `file_format`, `log_format`, `date_format`, `encoding` | The logger's own file (`log_file`). `file_format` falls back to the manager's value when left as `None` |
+| `use_color`, `enable_rich_tracebacks` | The logger's own console handler, i.e. only with `LoggerManager(shared_console=False)` |
+| `use_accelerate` | Drops this logger's records on non-main processes of a Hugging Face `accelerate` run, once `Accelerator()` has been created |
 
 ### Register a group of loggers at once
 
@@ -136,6 +152,8 @@ handler = create_file_handler(
     show_location=True,
 )
 ```
+
+Files hold plain text: paired Rich tags such as `[bold red]alert[/bold red]` color the console but are removed from file output. Brackets that are not a closed style pair (`arr[i]`, `[1/3]`, `[epoch 1]`) are left as written. Pass `strip_markup=False` to `create_file_handler()` to keep the tags.
 
 ### Structured (JSON Lines) output
 
@@ -205,10 +223,9 @@ with ProgressTracker() as progress:
 ## ML Training Utilities
 
 ```python
-from advlog import TrainingLogger
-import logging
+from advlog import TrainingLogger, get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 trainer = TrainingLogger(logger)
 
 trainer.log_train_step(
@@ -224,6 +241,8 @@ trainer.log_train_step(
 
 `log_configuration`, `log_train_step`, and `log_evaluation_results` attach their data as `extra` fields, so with `file_format="json"` or `"both"` each one becomes a queryable record (`extra.event` is `"config"`, `"train_step"`, or `"evaluation"`).
 
+Records logged through `TrainingLogger` report the file and line of *your* call (visible with `show_location=True` and in the JSON `module` / `function` / `line` fields), not a location inside the helper.
+
 ## Exception Logging
 
 ```python
@@ -232,6 +251,8 @@ from advlog import setup_exception_logging
 # Install a sys.excepthook that logs all uncaught exceptions
 setup_exception_logging()
 ```
+
+The traceback goes wherever your other logs go: the console and the log file(s) configured by `initialize()`, including the `.jsonl` file (as an `ERROR` record with an `exception` field). Pass your own logger to route it elsewhere. `KeyboardInterrupt` is left to Python's default handling.
 
 ## Real-World Example
 
@@ -254,7 +275,7 @@ python -m examples.real_world_demo.structured_demo   # JSON Lines output and que
 |---|---|---|
 | `config` | `omegaconf` | Advanced config file parsing |
 | `torch` | `torchinfo` | Model structure visualization |
-| `distributed` | `accelerate` | Distributed/multi-GPU training support |
+| `distributed` | `accelerate` | Main-process-only logging in multi-GPU runs (`LoggerConfig(use_accelerate=True)`) |
 
 ```bash
 pip install "advlog-core[config]"

@@ -73,7 +73,8 @@ def initialize(
         suffix: Optional suffix to append to the log filename. Ignored if log_file_path is provided.
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         use_color: Enable colored console output
-        enable_file_logging: Enable file logging
+        enable_file_logging: Enable file logging. Passing False on a later call
+                             detaches and closes the current log file.
         show_location: Show source location (file:line) in console sidebar
         file_mode: File opening mode ('w' for overwrite, 'a' for append/continue)
                    Default is 'a' (append), which allows breakpoint continue.
@@ -189,7 +190,8 @@ def get_logger(name: str, log_level: str | None = None) -> logging.Logger:
 
     Args:
         name: Name of the module (typically __name__)
-        log_level: Optional override for log level
+        log_level: Optional override for log level. Also applied when the
+                   logger already exists.
 
     Returns:
         Configured logging.Logger instance
@@ -227,11 +229,15 @@ def get_logger(name: str, log_level: str | None = None) -> logging.Logger:
     assert _LOGGER_MANAGER is not None
 
     if level_int is not None:
-        return _LOGGER_MANAGER.register_logger(
+        logger = _LOGGER_MANAGER.register_logger(
             name=name,
             file_strategy="merged",
             log_level=level_int,
         )
+        # register_logger returns an existing logger untouched; an explicit
+        # level is a request to change it
+        logger.setLevel(level_int)
+        return logger
 
     return _LOGGER_MANAGER.register_logger(
         name=name,
@@ -284,14 +290,16 @@ def setup_exception_logging(logger: logging.Logger | None = None) -> None:
     """Install a global handler to log uncaught exceptions.
 
     Args:
-        logger: Logger to use. Defaults to ``logging.getLogger("advlog")``.
+        logger: Logger to use. Defaults to the managed ``advlog`` logger, so
+                the traceback goes to the console and the log file(s) set up
+                by initialize().
 
     Example:
         >>> from advlog import setup_exception_logging
         >>> setup_exception_logging()
     """
     if logger is None:
-        logger = logging.getLogger("advlog")
+        logger = get_logger("advlog")
 
     def _log_uncaught(exc_type, exc_value, exc_tb):
         if issubclass(exc_type, KeyboardInterrupt):

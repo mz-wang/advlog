@@ -98,6 +98,19 @@ class TestTrainingLoggerStructuredData:
         assert events[0].epoch == 3
         assert events[0].metrics == {"accuracy": 0.95}
 
+    def test_records_report_callers_location(self, trainer_and_records):
+        trainer, records = trainer_and_records
+        trainer.log_configuration({"lr": 0.001, "model": {"depth": {"blocks": 4}}})
+        trainer.log_train_step(
+            epoch=1, total_epochs=2, batch=1, total_batches=2, loss_dict={"loss": 0.25}, time_elapsed=0.1
+        )
+        trainer.log_evaluation_results({"accuracy": 0.95})
+
+        assert records
+        # Every line, including nested config lines, points at this test rather than training.py
+        assert {r.funcName for r in records} == {"test_records_report_callers_location"}
+        assert {r.filename for r in records} == {"test_training.py"}
+
     def test_records_serialize_to_json(self, trainer_and_records):
         trainer, records = trainer_and_records
         trainer.log_train_step(

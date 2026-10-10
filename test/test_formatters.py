@@ -17,12 +17,15 @@
 import json
 import logging
 
+import pytest
+
 from advlog.core import (
     IndentedFormatter,
     JSONFormatter,
     PlainFormatter,
     RichColorFormatter,
 )
+from advlog.core.formatter import strip_rich_markup
 
 
 def _record(msg="Test message", level=logging.INFO):
@@ -78,6 +81,46 @@ class TestIndentedFormatter:
         assert len(lines) == 3
         assert "Line 1" in lines[0]
         assert lines[1].startswith("          "), f"Expected indentation, got: {repr(lines[1])}"
+
+
+class TestStripRichMarkup:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("[bold red]alert[/bold red] done", "alert done"),
+            ("[red]a[/] and [b]b[/b]", "a and b"),
+            ("[bold][red]nested[/red][/bold]", "nested"),
+            ("[link=https://example.com]docs[/link]", "docs"),
+            # Lone or non-style brackets are ordinary text and must survive
+            ("arr[i] = x[j]", "arr[i] = x[j]"),
+            ("[1/3][2/4] loss: 0.5", "[1/3][2/4] loss: 0.5"),
+            ("names: [alice, bob]", "names: [alice, bob]"),
+            ("[epoch 1] started [/epoch 1]", "[epoch 1] started [/epoch 1]"),
+            ("[bold]unclosed", "[bold]unclosed"),
+            ("path [/usr/bin]", "path [/usr/bin]"),
+            (r"\[bold]escaped[/bold]", r"\[bold]escaped[/bold]"),
+            ("no markup at all", "no markup at all"),
+        ],
+    )
+    def test_strips_only_paired_style_tags(self, text, expected):
+        assert strip_rich_markup(text) == expected
+
+    def test_formatters_strip_when_enabled(self):
+        record = _record("[bold red]alert[/bold red] done")
+        assert PlainFormatter(strip_markup=True).format(record).endswith("alert done")
+        assert IndentedFormatter(fmt="%(message)s", strip_markup=True).format(record) == "alert done"
+        assert json.loads(JSONFormatter(strip_markup=True).format(record))["message"] == "alert done"
+
+    def test_formatters_keep_markup_by_default(self):
+        record = _record("[bold red]alert[/bold red] done")
+        assert "[bold red]" in PlainFormatter().format(record)
+        assert "[bold red]" in json.loads(JSONFormatter().format(record))["message"]
+
+    def test_stripping_does_not_alter_the_record(self):
+        record = _record("[bold]x[/bold]")
+        PlainFormatter(strip_markup=True).format(record)
+        assert record.msg == "[bold]x[/bold]"
+        assert record.getMessage() == "[bold]x[/bold]"
 
 
 class TestJSONFormatter:
