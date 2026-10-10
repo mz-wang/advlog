@@ -14,9 +14,10 @@
 
 """Custom formatters for log messages."""
 
+import json
 import logging
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 __all__ = [
     "RichColorFormatter",
@@ -169,17 +170,55 @@ class IndentedFormatter(logging.Formatter):
         return message
 
 
+# Attributes logging itself puts on a record. Anything else came from ``extra=``.
+# "message" and "asctime" are added by other formatters handling the same record;
+# "taskName" only exists on Python 3.12+.
+_RESERVED_ATTRS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
+    "message",
+    "asctime",
+    "taskName",
+}
+
+
+def _json_default(obj: Any) -> Any:
+    """Convert values json cannot serialize natively.
+
+    Args:
+        obj: Value rejected by the JSON encoder
+
+    Returns:
+        A JSON-serializable stand-in
+    """
+    if isinstance(obj, (set, frozenset)):
+        return list(obj)
+
+    # numpy scalars/arrays and torch tensors
+    tolist = getattr(obj, "tolist", None)
+    if callable(tolist):
+        try:
+            return tolist()
+        except Exception:
+            pass
+
+    return str(obj)
+
+
 class JSONFormatter(logging.Formatter):
     """Formatter that outputs log records as JSON.
 
     This is useful for structured logging and log aggregation systems.
+    Fields passed via ``extra=`` are collected under the ``"extra"`` key so
+    they can never overwrite the standard fields. Non-finite floats (NaN,
+    Infinity) are written as ``null`` to keep every line valid JSON.
 
     Args:
         include_extras: Whether to include extra fields from the log record
 
     Example:
         formatter = JSONFormatter(include_extras=True)
-        # Output: {"time": "2024-01-01 12:00:00", "level": "INFO", "message": "test"}
+        logger.info("start", extra={"lr": 1e-3})
+        # Output: {"timestamp": "2024-01-01T12:00:00+08:00", "level": "INFO", ...,
+        #          "message": "start", "extra": {"lr": 0.001}}
     """
 
     def __init__(self, include_extras: bool = True):
@@ -195,10 +234,8 @@ class JSONFormatter(logging.Formatter):
         Returns:
             JSON-formatted log message
         """
-        import json
-
-        log_data = {
-            "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+        log_data: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created).astimezone().isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -210,31 +247,25 @@ class JSONFormatter(logging.Formatter):
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
 
-        if self.include_extras:
-            for key, value in record.__dict__.items():
-                if key not in [
-                    "name",
-                    "msg",
-                    "args",
-                    "created",
-                    "filename",
-                    "funcName",
-                    "levelname",
-                    "levelno",
-                    "lineno",
-                    "module",
-                    "msecs",
-                    "message",
-                    "pathname",
-                    "process",
-                    "processName",
-                    "relativeCreated",
-                    "thread",
-                    "threadName",
-                    "exc_info",
-                    "exc_text",
-                    "stack_info",
-                ]:
-                    log_data[key] = value
+        if record.stack_info:
+            log_data["stack"] = self.formatStack(record.stack_info)
 
-        return json.dumps(log_data, ensure_ascii=False)
+        if self.include_extras:
+            extras = {key: value for key, value in record.__dict__.items() if key not in _RESERVED_ATTRS}
+            if extras:
+                log_data["extra"] = extras
+
+        try:
+            text = json.dumps(log_data, ensure_ascii=False, default=_json_default)
+        except (TypeError, ValueError):
+            # Unserializable keys or circular references: keep the record anyway
+            log_data["extra"] = repr(log_data.get("extra"))
+            text = json.dumps(log_data, ensure_ascii=False, default=_json_default)
+
+        # NaN/Infinity are not valid JSON and make strict parsers reject the
+        # line, so write them as null. The substring test only gates the
+        # re-encode; a message that merely contains the word passes through intact.
+        if "NaN" in text or "Infinity" in text:
+            text = json.dumps(json.loads(text, parse_constant=lambda _: None), ensure_ascii=False)
+
+        return text

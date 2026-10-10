@@ -80,6 +80,7 @@ from .core import (
 from .handlers import (
     create_console_handler,
     create_file_handler,
+    create_file_handlers,
 )
 
 # Plugin imports (with graceful degradation)
@@ -125,6 +126,7 @@ __all__ = [
     # Handlers
     "create_console_handler",
     "create_file_handler",
+    "create_file_handlers",
     # Plugins
     "ProgressTracker",
     "create_progress_bar",

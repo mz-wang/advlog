@@ -71,10 +71,16 @@ class TrainingLogger:
             config: Configuration object (OmegaConf, dict, or any object)
             title: Section title for the log
 
+        The header line carries the whole configuration as structured data
+        (``extra["config"]``), so JSON log files hold it as a single record.
+
         Example:
             trainer.log_configuration(cfg, title="Training Config")
         """
-        self.logger.info(f"===== {title} =====")
+        self.logger.info(
+            f"===== {title} =====",
+            extra={"event": "config", "title": title, "config": self._config_to_data(config)},
+        )
 
         if OMEGACONF_AVAILABLE and hasattr(config, "__module__"):
             # Try to detect OmegaConf objects
@@ -88,6 +94,30 @@ class TrainingLogger:
             self._log_generic_config(config)
 
         self.logger.info("=" * (len(title) + 12))
+
+    def _config_to_data(self, config: Any) -> Any:
+        """Convert a configuration object to plain data for structured logging.
+
+        Args:
+            config: Configuration object (OmegaConf, dict, or any object)
+
+        Returns:
+            Plain dict where possible, otherwise the string form
+        """
+        if OMEGACONF_AVAILABLE and "omegaconf" in getattr(config, "__module__", ""):
+            try:
+                return OmegaConf.to_container(config, resolve=True)
+            except Exception:
+                # Missing values or unresolvable interpolations
+                return OmegaConf.to_container(config, resolve=False)
+
+        if isinstance(config, dict):
+            return config
+
+        if hasattr(config, "__dict__"):
+            return {key: value for key, value in config.__dict__.items() if not key.startswith("_")}
+
+        return str(config)
 
     def _log_dict_config(self, config: dict[str, Any], indent: int = 0):
         """Log a dictionary configuration recursively.
@@ -195,8 +225,19 @@ class TrainingLogger:
         else:
             message = f"[{epoch}/{total_epochs}][{batch}/{total_batches}] {loss_str}, in {time_elapsed:.2f}s"
 
-        # Log to console/file
-        self.logger.info(message)
+        # Log to console/file. The extra fields are what JSON log files record.
+        self.logger.info(
+            message,
+            extra={
+                "event": "train_step",
+                "epoch": epoch,
+                "total_epochs": total_epochs,
+                "batch": batch,
+                "total_batches": total_batches,
+                "metrics": {**loss_dict, **(additional_metrics or {})},
+                "time_elapsed": time_elapsed,
+            },
+        )
 
         # Log to CSV if requested
         if csv_path:
@@ -261,10 +302,12 @@ class TrainingLogger:
                 epoch=10
             )
         """
+        extra = {"event": "evaluation", "title": title, "epoch": epoch, "metrics": metrics}
+
         if epoch is not None:
-            self.logger.info(f"===== {title} (Epoch {epoch}) =====")
+            self.logger.info(f"===== {title} (Epoch {epoch}) =====", extra=extra)
         else:
-            self.logger.info(f"===== {title} =====")
+            self.logger.info(f"===== {title} =====", extra=extra)
 
         for metric_name, value in metrics.items():
             if isinstance(value, float):

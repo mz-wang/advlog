@@ -114,7 +114,7 @@ Four formatters are available:
 | `RichColorFormatter` | Wraps messages in Rich color markup by log level |
 | `PlainFormatter` | Plain text, no color codes |
 | `IndentedFormatter` | Indents continuation lines of multi-line messages |
-| `JSONFormatter` | Outputs each record as a JSON object |
+| `JSONFormatter` | Outputs each record as a JSON object, with `extra=` fields under `"extra"` |
 
 ```python
 from advlog import JSONFormatter
@@ -132,9 +132,43 @@ from advlog import create_file_handler
 
 handler = create_file_handler(
     log_file="logs/app.log",
-    file_mode="a",
+    mode="a",
     show_location=True,
 )
+```
+
+### Structured (JSON Lines) output
+
+Set `file_format` to get a machine-readable log next to (or instead of) the text log:
+
+| `file_format` | Files written |
+|---|---|
+| `"text"` (default) | `app.log` |
+| `"json"` | `app.jsonl` |
+| `"both"` | `app.log` and `app.jsonl` |
+
+```python
+from advlog import initialize, get_logger
+
+initialize(output_dir="./logs", session_name="train", file_format="both")
+
+log = get_logger(__name__)
+log.info("Run started", extra={"lr": 1e-3, "batch_size": 32})
+```
+
+The `.jsonl` file holds one JSON object per line. Anything passed via `extra=` is stored under the `"extra"` key:
+
+```json
+{"timestamp": "2026-03-06T14:30:22.123456+08:00", "level": "INFO", "logger": "__main__", "message": "Run started", "module": "train", "function": "<module>", "line": 6, "extra": {"lr": 0.001, "batch_size": 32}}
+```
+
+Values JSON cannot represent (paths, sets, NumPy arrays, tensors, arbitrary objects) are converted rather than dropped, and `NaN`/`Infinity` are written as `null` so every line stays valid JSON. `file_format` is also accepted by `LoggerManager`, `LoggerConfig`, and `create_logger_group`; `create_file_handlers()` builds the handlers directly.
+
+```python
+import pandas as pd
+
+df = pd.read_json("logs/train.jsonl", lines=True)
+errors = df[df["level"] == "ERROR"]
 ```
 
 ### Smart log file naming
@@ -183,10 +217,12 @@ trainer.log_train_step(
     batch=100,
     total_batches=1000,
     loss_dict={"loss": 0.4231, "accuracy": 0.872},
-    learning_rate=1e-3,
     time_elapsed=45.2,
+    additional_metrics={"lr": 1e-3},
 )
 ```
+
+`log_configuration`, `log_train_step`, and `log_evaluation_results` attach their data as `extra` fields, so with `file_format="json"` or `"both"` each one becomes a queryable record (`extra.event` is `"config"`, `"train_step"`, or `"evaluation"`).
 
 ## Exception Logging
 
@@ -203,6 +239,7 @@ See [`examples/real_world_demo/`](examples/real_world_demo/) for a complete mult
 
 ```bash
 python -m examples.real_world_demo.main
+python -m examples.real_world_demo.structured_demo   # JSON Lines output and querying it
 ```
 
 ## Dependencies

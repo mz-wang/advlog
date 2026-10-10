@@ -58,6 +58,7 @@ def initialize(
     show_location: bool = False,
     file_mode: str = "a",
     log_file_path: str | None = None,
+    file_format: str = "text",
 ) -> LoggerManager:
     """
     Initialize the global logging system.
@@ -80,6 +81,10 @@ def initialize(
         log_file_path: Specific log file path. If provided, it will COMPLETELY OVERRIDE
                        output_dir, session_name and suffix related naming logic.
                        This is essential for breakpoint continue - specify the exact file to append to.
+        file_format: File output format. "text" (default) writes the human-readable log,
+                     "json" writes JSON Lines (one object per line) to the same path with a
+                     ``.jsonl`` extension, and "both" writes the two files side by side.
+                     Fields passed via ``extra=`` appear under ``"extra"`` in the JSON output.
 
     Returns:
         LoggerManager instance
@@ -103,6 +108,9 @@ def initialize(
         ...     session_name="reconstruction",
         ...     file_mode="w"  # Overwrite existing log file
         ... )
+        >>> # Structured logging (text log plus a queryable .jsonl next to it)
+        >>> manager = initialize(session_name="reconstruction", file_format="both")
+        >>> get_logger(__name__).info("run started", extra={"lr": 1e-3, "batch_size": 32})
     """
     global _LOGGER_MANAGER, _INITIALIZED, _INIT_CONFIG
 
@@ -148,6 +156,7 @@ def initialize(
         use_color=use_color,
         show_location=show_location,
         file_mode=file_mode,
+        file_format=file_format,
     )
 
     # Store configuration for later reference
@@ -161,6 +170,7 @@ def initialize(
         "show_location": show_location,
         "file_mode": file_mode,
         "log_file_path": log_file_path,
+        "file_format": file_format,
     }
 
     _INITIALIZED = True

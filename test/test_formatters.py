@@ -105,10 +105,103 @@ class TestJSONFormatter:
         record = _record()
         record.my_field = "my_value"
         data = json.loads(JSONFormatter(include_extras=True).format(record))
-        assert data.get("my_field") == "my_value"
+        assert data["extra"] == {"my_field": "my_value"}
+        assert "my_field" not in data
 
     def test_extras_excluded_when_disabled(self):
         record = _record()
         record.my_field = "my_value"
         data = json.loads(JSONFormatter(include_extras=False).format(record))
+        assert "extra" not in data
         assert "my_field" not in data
+
+    def test_no_extra_key_without_extras(self):
+        data = json.loads(JSONFormatter().format(_record()))
+        assert "extra" not in data
+        assert "taskName" not in data
+
+    def test_extras_cannot_overwrite_standard_fields(self):
+        record = _record("real message", logging.INFO)
+        record.level = "FAKE"
+        record.timestamp = "never"
+        data = json.loads(JSONFormatter().format(record))
+        assert data["level"] == "INFO"
+        assert data["timestamp"] != "never"
+        assert data["extra"] == {"level": "FAKE", "timestamp": "never"}
+
+    def test_fields_set_by_other_formatters_not_leaked(self):
+        record = _record()
+        PlainFormatter().format(record)  # sets record.asctime and record.message
+        data = json.loads(JSONFormatter().format(record))
+        assert "extra" not in data
+
+    def test_unserializable_extras_do_not_drop_record(self):
+        from pathlib import Path
+
+        class Custom:
+            def __str__(self):
+                return "custom!"
+
+        record = _record("kept")
+        record.path = Path("a/b")
+        record.tags = {"x"}
+        record.obj = Custom()
+        data = json.loads(JSONFormatter().format(record))
+        assert data["message"] == "kept"
+        assert data["extra"] == {"path": str(Path("a/b")), "tags": ["x"], "obj": "custom!"}
+
+    def test_array_like_extras_use_tolist(self):
+        class ArrayLike:
+            def tolist(self):
+                return [1, 2, 3]
+
+        record = _record()
+        record.values = ArrayLike()
+        data = json.loads(JSONFormatter().format(record))
+        assert data["extra"] == {"values": [1, 2, 3]}
+
+    def test_unencodable_extras_fall_back_to_repr(self):
+        record = _record("kept")
+        record.bad_keys = {(1, 2): "tuple key"}
+        loop = {}
+        loop["self"] = loop
+        record.loop = loop
+        data = json.loads(JSONFormatter().format(record))
+        assert data["message"] == "kept"
+        assert isinstance(data["extra"], str)
+        assert "tuple key" in data["extra"]
+
+    def test_non_finite_floats_written_as_null(self):
+        class ArrayLike:
+            def tolist(self):
+                return [1.0, float("nan")]
+
+        record = _record("loss is NaN, not Infinity")
+        record.metrics = {"loss": float("nan"), "grad": float("inf"), "floor": float("-inf"), "acc": 0.5}
+        record.values = ArrayLike()
+        formatted = JSONFormatter().format(record)
+
+        def reject(constant):
+            raise AssertionError(f"non-standard JSON constant: {constant}")
+
+        data = json.loads(formatted, parse_constant=reject)
+        assert data["extra"]["metrics"] == {"loss": None, "grad": None, "floor": None, "acc": 0.5}
+        assert data["extra"]["values"] == [1.0, None]
+        assert data["message"] == "loss is NaN, not Infinity"
+
+    def test_timestamp_has_timezone(self):
+        from datetime import datetime
+
+        data = json.loads(JSONFormatter().format(_record()))
+        assert datetime.fromisoformat(data["timestamp"]).tzinfo is not None
+
+    def test_stack_info_included(self):
+        record = _record()
+        record.stack_info = "Stack (most recent call last):\n  File ..."
+        data = json.loads(JSONFormatter().format(record))
+        assert data["stack"].startswith("Stack")
+
+    def test_multiline_message_stays_on_one_line(self):
+        formatted = JSONFormatter().format(_record("line 1\nline 2"))
+        assert "\n" not in formatted
+        assert json.loads(formatted)["message"] == "line 1\nline 2"

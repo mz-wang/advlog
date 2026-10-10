@@ -14,7 +14,9 @@
 
 """Tests for LoggerManager and global API."""
 
+import json
 import logging
+import logging.handlers
 import tempfile
 from pathlib import Path
 
@@ -138,6 +140,125 @@ class TestLoggerManager:
             LoggerManager.reset()
 
 
+def _read_jsonl(path):
+    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()]
+
+
+class TestFileFormat:
+    """Test structured (JSON Lines) file output."""
+
+    def test_both_writes_text_and_jsonl(self):
+        """file_format='both' writes a text file and a .jsonl file side by side."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            manager = LoggerManager(shared_console=False, shared_file=str(shared), file_format="both")
+            log = manager.register_logger("fmt_both", file_strategy="merged")
+            log.info("run started", extra={"lr": 0.001})
+            LoggerManager.reset()
+
+            assert "run started" in shared.read_text()
+            records = _read_jsonl(shared.with_suffix(".jsonl"))
+            assert len(records) == 1
+            assert records[0]["message"] == "run started"
+            assert records[0]["logger"] == "fmt_both"
+            assert records[0]["extra"] == {"lr": 0.001}
+
+    def test_json_only_writes_jsonl(self):
+        """file_format='json' writes only the .jsonl file."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            manager = LoggerManager(shared_console=False, shared_file=str(shared), file_format="json")
+            log = manager.register_logger("fmt_json", file_strategy="merged")
+            log.info("only json")
+            LoggerManager.reset()
+
+            assert not shared.exists()
+            assert _read_jsonl(shared.with_suffix(".jsonl"))[0]["message"] == "only json"
+
+    def test_text_is_default(self):
+        """The default format writes no .jsonl file."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            manager = LoggerManager(shared_console=False, shared_file=str(shared))
+            manager.register_logger("fmt_text", file_strategy="merged").info("plain")
+            LoggerManager.reset()
+
+            assert shared.exists()
+            assert not shared.with_suffix(".jsonl").exists()
+
+    def test_invalid_format_rejected(self):
+        """Unknown formats raise ValueError."""
+        with pytest.raises(ValueError):
+            LoggerManager(shared_console=False, file_format="yaml")
+        with pytest.raises(ValueError):
+            LoggerConfig(name="bad", file_format="yaml")
+
+    def test_separate_logger_inherits_manager_format(self):
+        """Separate-file loggers follow the manager's file_format."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = Path(tmpdir) / "mod.log"
+            manager = LoggerManager(shared_console=False, file_format="both")
+            log = manager.register_logger("fmt_sep", file_strategy="separate", log_file=str(log_file))
+            log.info("separate")
+            LoggerManager.reset()
+
+            assert "separate" in log_file.read_text()
+            assert _read_jsonl(log_file.with_suffix(".jsonl"))[0]["message"] == "separate"
+
+    def test_loggerconfig_overrides_manager_format(self):
+        """LoggerConfig.file_format overrides the manager's file_format."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = Path(tmpdir) / "mod.log"
+            manager = LoggerManager(shared_console=False)
+            config = LoggerConfig(name="fmt_cfg", log_file=str(log_file), file_format="json", console_output=False)
+            manager.register_logger(config=config).info("from config")
+            LoggerManager.reset()
+
+            assert not log_file.exists()
+            assert _read_jsonl(log_file.with_suffix(".jsonl"))[0]["message"] == "from config"
+
+    def test_reinitialize_switches_format(self):
+        """Re-initializing with a new format re-attaches handlers to existing loggers."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            manager = LoggerManager(shared_console=False)
+            log = manager.register_logger("fmt_reinit", file_strategy="merged", use_console=False)
+            assert log.handlers == []
+            LoggerManager(shared_console=False, shared_file=str(shared), file_format="both")
+            log.info("after reinit")
+            assert len(log.handlers) == 2
+            LoggerManager.reset()
+
+            assert "after reinit" in shared.read_text()
+            assert _read_jsonl(shared.with_suffix(".jsonl"))[0]["message"] == "after reinit"
+
+
+class TestCreateFileHandlers:
+    """Test the create_file_handlers factory."""
+
+    def test_rotating_json(self):
+        """Rotation and JSON output can be combined."""
+        from advlog import JSONFormatter, create_file_handler
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            handler = create_file_handler(str(Path(tmpdir) / "rot.jsonl"), max_file_size=1024, use_json_format=True)
+            assert isinstance(handler, logging.handlers.RotatingFileHandler)
+            assert isinstance(handler.formatter, JSONFormatter)
+            handler.close()
+
+    def test_json_path_kept_when_already_jsonl(self):
+        """A .jsonl path is used as-is for the JSON file."""
+        from advlog import create_file_handlers
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            base = Path(tmpdir) / "run.jsonl"
+            handlers = create_file_handlers(str(base), file_format="both")
+            names = sorted(Path(h.baseFilename).name for h in handlers)
+            assert names == ["run.jsonl", "run.log"]
+            for h in handlers:
+                h.close()
+
+
 class TestCreateLoggerGroup:
     """Test create_logger_group convenience function."""
 
@@ -192,6 +313,25 @@ class TestGlobalAPI:
             assert "initialized message" in content
             # Close all handlers before tmpdir cleanup
             reset()
+
+    def test_initialize_with_both_formats(self):
+        """initialize(file_format='both') adds a .jsonl file next to the text log."""
+        from advlog import get_logger, initialize, reset
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            initialize(output_dir=tmpdir, session_name="structured", file_mode="w", file_format="both")
+            log = get_logger("init_structured")
+            log.info("run params", extra={"params": {"lr": 0.001, "batch_size": 32}})
+            # Close all handlers before reading and tmpdir cleanup
+            reset()
+
+            log_files = list(Path(tmpdir).rglob("*.log"))
+            jsonl_files = list(Path(tmpdir).rglob("*.jsonl"))
+            assert len(log_files) == 1
+            assert len(jsonl_files) == 1
+            assert jsonl_files[0].stem == log_files[0].stem
+            records = _read_jsonl(jsonl_files[0])
+            assert records[0]["extra"]["params"] == {"lr": 0.001, "batch_size": 32}
 
     def test_setup_exception_logging(self):
         """setup_exception_logging installs a custom excepthook."""

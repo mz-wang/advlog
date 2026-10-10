@@ -32,6 +32,8 @@ class LoggerConfig:
         log_file: Path to an individual log file for this logger
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         file_mode: File opening mode ('w' for overwrite, 'a' for append)
+        file_format: "text", "json" (JSON Lines), or "both". None inherits
+                     the manager's setting.
         use_color: Enable colored console output
         console_output: Enable console output
         enable_rich_tracebacks: Enable rich formatted tracebacks
@@ -57,6 +59,7 @@ class LoggerConfig:
     log_file: str | None = None
     log_level: str = "INFO"
     file_mode: str = "a"
+    file_format: str | None = None
 
     # Console behaviour
     use_color: bool = True
@@ -79,6 +82,9 @@ class LoggerConfig:
         if self.log_level not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
             raise ValueError(f"Invalid log level: {self.log_level}")
 
+        if self.file_format is not None and self.file_format not in ["text", "json", "both"]:
+            raise ValueError(f"Invalid file format: {self.file_format}")
+
         if self.use_color:
             from advlog.utils.environment import supports_color
 
@@ -100,6 +106,7 @@ class LoggerConfig:
             "log_file": self.log_file,
             "log_level": self.log_level,
             "file_mode": self.file_mode,
+            "file_format": self.file_format,
             "use_color": self.use_color,
             "console_output": self.console_output,
             "show_location": self.show_location,
