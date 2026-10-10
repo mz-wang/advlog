@@ -36,6 +36,10 @@ class LoggerConfig:
         file_mode: File opening mode ('w' for overwrite, 'a' for append)
         file_format: "text", "json" (JSON Lines), or "both". None inherits
                      the manager's setting.
+        max_file_size: Rotate the log file when it reaches this many bytes.
+                       None inherits the manager's setting.
+        backup_count: Number of rotated files to keep. None inherits the
+                      manager's setting.
         use_color: Enable colored console output. Applies only when the
                    manager does not use a shared console (a shared console
                    has one color setting for everyone).
@@ -50,9 +54,10 @@ class LoggerConfig:
         use_accelerate: Suppress output on non-main processes of an
                         ``accelerate`` run (distributed training)
 
-    The file settings (``file_mode``, ``file_format``, ``date_format``,
-    ``log_format``, ``encoding``) apply to the file named by ``log_file``;
-    without ``log_file`` the logger has no file of its own.
+    The file settings (``file_mode``, ``file_format``, ``max_file_size``,
+    ``backup_count``, ``date_format``, ``log_format``, ``encoding``) apply to
+    the file named by ``log_file``; without ``log_file`` the logger has no
+    file of its own.
 
     Example:
         config = LoggerConfig(
@@ -70,6 +75,8 @@ class LoggerConfig:
     log_level: str = "INFO"
     file_mode: str = "a"
     file_format: str | None = None
+    max_file_size: int | None = None
+    backup_count: int | None = None
 
     # Console behaviour
     use_color: bool = True

@@ -98,11 +98,14 @@ except ImportError:
 # Utility imports
 # Global management API
 from .api import (
+    bind_context,
+    clear_context,
     get_logger,
     get_progress,
     initialize,
     reset,
     setup_exception_logging,
+    unbind_context,
 )
 from .utils import (
     LogNamingStrategy,
@@ -140,6 +143,9 @@ __all__ = [
     "initialize",
     "get_logger",
     "get_progress",
+    "bind_context",
+    "unbind_context",
+    "clear_context",
     "reset",
     "setup_exception_logging",
 ]

@@ -19,9 +19,10 @@ With file_format="both" every record is written twice:
     logs/structured_demo.jsonl  - one JSON object per line, for parsing/querying
 
 Anything passed via extra={...} is invisible in the text log but stored under
-the "extra" key in the .jsonl file. The second half of this script reads the
-.jsonl file back and answers a few questions that would need regex-scraping
-with a text log.
+the "extra" key in the .jsonl file, and so are the context fields bound once
+at startup (run_id, seed). The second half of this script reads the .jsonl
+file back and answers a few questions that would need regex-scraping with a
+text log.
 
 Usage:
     python -m examples.real_world_demo.structured_demo
@@ -34,7 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from advlog import TrainingLogger, get_logger, initialize
+from advlog import TrainingLogger, bind_context, get_logger, initialize, unbind_context
 
 LOG_FILE = Path("./logs/structured_demo.log")
 JSONL_FILE = LOG_FILE.with_suffix(".jsonl")
@@ -46,6 +47,7 @@ initialize(
     file_mode="w",
     log_level="INFO",
     file_format="both",  # <-- text log + .jsonl next to it
+    context={"run_id": "run_001", "seed": 42},  # <-- attached to every record
 )
 
 log = get_logger(__name__)
@@ -76,9 +78,14 @@ def run_training() -> None:
     # Plain logger call with ad-hoc structured fields
     log.info("Dataset loaded", extra={"event": "data_loaded", "train_samples": 50000, "val_samples": 10000})
 
+    # Decoration for the human reader only: kept out of the .jsonl file
+    log.info("-" * 40, extra={"text_only": True})
+    log.info("[bold green]Training started[/bold green]")  # markup colors the console, files get plain text
+
     total_epochs, total_batches = 3, 4
     step = 0
     for epoch in range(1, total_epochs + 1):
+        bind_context(epoch=epoch)  # every record of this epoch now carries it
         for batch in range(1, total_batches + 1):
             step += 1
             loss = fake_loss(step)
@@ -101,6 +108,8 @@ def run_training() -> None:
                 )
 
         trainer.log_evaluation_results({"val_loss": fake_loss(step + 1), "val_acc": 0.6 + 0.1 * epoch}, epoch=epoch)
+
+    unbind_context("epoch")
 
     # Exceptions keep their traceback, plus whatever context you attach
     try:
@@ -152,7 +161,15 @@ def analyze() -> None:
             if "exception" in r:
                 print(f"      exception: {r['exception'].splitlines()[-1]}")
 
-    print("\n[6] One raw line from the file, for reference:")
+    print("\n[6] Records per logging call site (TrainingLogger reports the caller, not itself):")
+    sites: dict[str, int] = {}
+    for r in records:
+        site = f"{r['module']}.{r['function']}"
+        sites[site] = sites.get(site, 0) + 1
+    for site, count in sites.items():
+        print(f"  {site}: {count}")
+
+    print("\n[7] One raw line from the file, for reference:")
     print("  " + next(line for line in JSONL_FILE.read_text(encoding="utf-8").splitlines() if "train_step" in line))
 
     print()

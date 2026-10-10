@@ -19,7 +19,7 @@ import threading
 from typing import Any
 
 from advlog.core.config import LoggerConfig
-from advlog.core.filters import MainProcessFilter
+from advlog.core.filters import ContextFilter, MainProcessFilter
 from advlog.handlers.console import create_console_handler
 from advlog.handlers.file import FILE_FORMATS, create_file_handlers
 from advlog.utils.console import get_shared_console
@@ -80,6 +80,9 @@ class LoggerManager:
         show_location: bool = False,
         file_mode: str = "w",
         file_format: str = "text",
+        max_file_size: int | None = None,
+        backup_count: int = 5,
+        context: dict[str, Any] | None = None,
     ):
         """Initialize the logger manager.
 
@@ -100,6 +103,12 @@ class LoggerManager:
             file_format: File output format: "text" (human-readable), "json"
                          (JSON Lines, written with a ``.jsonl`` extension), or
                          "both" (text file plus a ``.jsonl`` file next to it)
+            max_file_size: Rotate log files when they reach this many bytes
+                           (None = no rotation). Rotating files are always
+                           appended to, regardless of file_mode.
+            backup_count: Number of rotated files to keep
+            context: Fields attached to every record (e.g. run id). None
+                     keeps the context already bound; see bind_context().
         """
         # Initialize internal storage ONLY ONCE
         if not hasattr(self, "_internal_init"):
@@ -108,10 +117,16 @@ class LoggerManager:
             self._console_handler: logging.Handler | None = None
             self._shared_file_handlers: list[logging.Handler] = []
             self._console: Console | None = None
+            self._context_filter = ContextFilter()
             self._internal_init = True
 
         if file_format not in FILE_FORMATS:
             raise ValueError(f"Invalid file format: {file_format!r} (expected one of {FILE_FORMATS})")
+
+        if context is not None:
+            replacement = ContextFilter()
+            replacement.bind(**context)  # validates before anything is changed
+            self._context_filter.fields = replacement.fields
 
         # Capture old handlers for cleanup if re-initializing
         old_console = self._console_handler
@@ -125,6 +140,8 @@ class LoggerManager:
         self.show_location = show_location
         self.file_mode = file_mode
         self.file_format = file_format
+        self.max_file_size = max_file_size
+        self.backup_count = backup_count
 
         # The shared console has a single color setting, used by every
         # handler (and progress bar) that draws on it
@@ -199,9 +216,45 @@ class LoggerManager:
                 log_file=self.shared_file,
                 file_format=self.file_format,
                 mode=self.file_mode,
+                max_file_size=self.max_file_size,
+                backup_count=self.backup_count,
                 log_level=self.file_log_level,
                 show_location=self.show_location,
             )
+
+    def bind_context(self, **fields: Any) -> None:
+        """Attach fields to every record of every managed logger.
+
+        Bound fields behave like ``extra=`` passed on each call; an explicit
+        ``extra=`` on a call wins over the bound value.
+
+        Args:
+            **fields: Field names and values (e.g. run_id="exp-42")
+
+        Example:
+            manager.bind_context(run_id="exp-42", git_sha="ab6e876")
+        """
+        self._context_filter.bind(**fields)
+
+    def unbind_context(self, *keys: str) -> None:
+        """Stop attaching the given context fields.
+
+        Args:
+            *keys: Field names to remove
+        """
+        self._context_filter.unbind(*keys)
+
+    def clear_context(self) -> None:
+        """Stop attaching any context fields."""
+        self._context_filter.clear()
+
+    def get_context(self) -> dict[str, Any]:
+        """Get the currently bound context fields.
+
+        Returns:
+            Copy of the bound fields
+        """
+        return dict(self._context_filter.fields)
 
     def register_logger(
         self,
@@ -286,9 +339,10 @@ class LoggerManager:
         # Clear any existing handlers and filters left by an earlier registration
         logger.handlers.clear()
         for old_filter in logger.filters[:]:
-            if isinstance(old_filter, MainProcessFilter):
+            if isinstance(old_filter, (ContextFilter, MainProcessFilter)):
                 logger.removeFilter(old_filter)
 
+        logger.addFilter(self._context_filter)
         if config is not None and config.use_accelerate:
             logger.addFilter(MainProcessFilter())
 
@@ -312,14 +366,20 @@ class LoggerManager:
         # Add file handler based on strategy
         if file_strategy == "separate" and log_file:
             # Per-logger file settings: config wins where it sets a value
-            file_options: dict[str, Any] = {"file_format": self.file_format, "mode": "a"}
+            file_options: dict[str, Any] = {
+                "file_format": self.file_format,
+                "mode": "a",
+                "max_file_size": self.max_file_size,
+                "backup_count": self.backup_count,
+            }
             if config is not None:
                 file_options["mode"] = config.file_mode
                 file_options["encoding"] = config.encoding
                 file_options["date_format"] = config.date_format
                 file_options["log_format"] = config.log_format
-                if config.file_format is not None:
-                    file_options["file_format"] = config.file_format
+                for key in ("file_format", "max_file_size", "backup_count"):
+                    if getattr(config, key) is not None:
+                        file_options[key] = getattr(config, key)
 
             file_handlers = create_file_handlers(
                 log_file=log_file,
@@ -393,6 +453,8 @@ class LoggerManager:
                 logger.removeHandler(handler)
                 handler.close()
 
+            logger.removeFilter(self._context_filter)
+
             del self.loggers[name]
 
     def shutdown(self):
@@ -401,8 +463,10 @@ class LoggerManager:
             for handler in logger.handlers[:]:
                 logger.removeHandler(handler)
                 handler.close()
+            logger.removeFilter(self._context_filter)
 
         self.loggers.clear()
+        self._context_filter.clear()
 
         if self._console_handler:
             self._console_handler.close()

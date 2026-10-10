@@ -35,6 +35,7 @@ Usage:
 import logging
 import os
 import sys
+from typing import Any
 
 from advlog.core import LoggerManager
 from advlog.plugins import ProgressTracker
@@ -59,6 +60,9 @@ def initialize(
     file_mode: str = "a",
     log_file_path: str | None = None,
     file_format: str = "text",
+    max_file_size: int | None = None,
+    backup_count: int = 5,
+    context: dict[str, Any] | None = None,
 ) -> LoggerManager:
     """
     Initialize the global logging system.
@@ -86,6 +90,14 @@ def initialize(
                      "json" writes JSON Lines (one object per line) to the same path with a
                      ``.jsonl`` extension, and "both" writes the two files side by side.
                      Fields passed via ``extra=`` appear under ``"extra"`` in the JSON output.
+        max_file_size: Rotate the log file when it reaches this many bytes, keeping
+                       ``backup_count`` older files (``app.log.1``, ``app.log.2``, ...).
+                       None (default) disables rotation. A rotating file is always
+                       appended to, regardless of file_mode.
+        backup_count: Number of rotated files to keep.
+        context: Fields attached to every record, e.g. ``{"run_id": "exp-42"}``. They
+                 behave like ``extra=`` passed on each call. None keeps the context
+                 already bound; use bind_context() to change it later.
 
     Returns:
         LoggerManager instance
@@ -112,6 +124,13 @@ def initialize(
         >>> # Structured logging (text log plus a queryable .jsonl next to it)
         >>> manager = initialize(session_name="reconstruction", file_format="both")
         >>> get_logger(__name__).info("run started", extra={"lr": 1e-3, "batch_size": 32})
+        >>> # Long runs: rotate at 50 MB, keep 3 old files, tag every record with the run id
+        >>> manager = initialize(
+        ...     session_name="reconstruction",
+        ...     max_file_size=50 * 1024 * 1024,
+        ...     backup_count=3,
+        ...     context={"run_id": "exp-42"},
+        ... )
     """
     global _LOGGER_MANAGER, _INITIALIZED, _INIT_CONFIG
 
@@ -158,6 +177,9 @@ def initialize(
         show_location=show_location,
         file_mode=file_mode,
         file_format=file_format,
+        max_file_size=max_file_size,
+        backup_count=backup_count,
+        context=context,
     )
 
     # Store configuration for later reference
@@ -172,6 +194,8 @@ def initialize(
         "file_mode": file_mode,
         "log_file_path": log_file_path,
         "file_format": file_format,
+        "max_file_size": max_file_size,
+        "backup_count": backup_count,
     }
 
     _INITIALIZED = True
@@ -268,6 +292,51 @@ def get_progress() -> ProgressTracker:
     return _PROGRESS_TRACKER
 
 
+def _get_manager() -> LoggerManager:
+    """Get the global manager, auto-initializing (console-only) like get_logger()."""
+    if not _INITIALIZED:
+        initialize(enable_file_logging=False)
+
+    assert _LOGGER_MANAGER is not None
+    return _LOGGER_MANAGER
+
+
+def bind_context(**fields: Any) -> None:
+    """
+    Attach fields to every record logged from now on.
+
+    Bound fields behave like ``extra=`` passed on each call: invisible in the
+    default text format, stored under ``"extra"`` in JSON output. An explicit
+    ``extra=`` on a call wins over the bound value. The context survives a
+    later initialize() and is cleared by reset().
+
+    Args:
+        **fields: Field names and values
+
+    Example:
+        >>> from advlog import bind_context, get_logger
+        >>> bind_context(run_id="exp-42", git_sha="ab6e876")
+        >>> get_logger(__name__).info("started")  # JSON: "extra": {"run_id": "exp-42", ...}
+        >>> bind_context(epoch=3)  # add or update a field later
+    """
+    _get_manager().bind_context(**fields)
+
+
+def unbind_context(*keys: str) -> None:
+    """
+    Stop attaching the given context fields.
+
+    Args:
+        *keys: Field names to remove (unknown names are ignored)
+    """
+    _get_manager().unbind_context(*keys)
+
+
+def clear_context() -> None:
+    """Stop attaching any context fields."""
+    _get_manager().clear_context()
+
+
 def reset():
     """
     Reset the global logging system.
@@ -315,6 +384,9 @@ __all__ = [
     "initialize",
     "get_logger",
     "get_progress",
+    "bind_context",
+    "unbind_context",
+    "clear_context",
     "reset",
     "setup_exception_logging",
 ]

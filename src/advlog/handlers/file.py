@@ -27,6 +27,17 @@ DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _LOCATION = "[%(filename)s:%(lineno)d:%(funcName)s]"
 
 
+class _SkipTextOnly(logging.Filter):
+    """Keep display-only records out of JSON files.
+
+    Records logged with ``extra={"text_only": True}`` (separators, banners,
+    pretty-printed lines) still reach the console and text files.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not getattr(record, "text_only", False)
+
+
 def _build_formatter(
     use_json_format: bool,
     use_indented_format: bool,
@@ -140,6 +151,8 @@ class FileHandler:
 
         handler.setFormatter(formatter)
         handler.setLevel(log_level)
+        if use_json_format:
+            handler.addFilter(_SkipTextOnly())
 
         return handler
 
@@ -163,11 +176,14 @@ class RotatingFileHandler:
         location_width: int = 50,
         indent_size: int = 27,
         date_format: str = DEFAULT_DATE_FORMAT,
-        log_format: str = "%(asctime)s [%(levelname)s] %(message)s",
+        log_format: str = DEFAULT_LOG_FORMAT,
         use_json_format: bool = False,
         strip_markup: bool = True,
     ) -> logging.Handler:
         """Create a rotating file handler.
+
+        The file is always appended to: rotation, not truncation, is what
+        keeps it from growing.
 
         Args:
             log_file: Path to the log file
@@ -191,8 +207,10 @@ class RotatingFileHandler:
         # Create directory if it doesn't exist
         ensure_dir(log_file)
 
-        # Create handler
-        handler = StdRotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count, encoding=encoding)
+        # Create handler. delay=True: see FileHandler.create
+        handler = StdRotatingFileHandler(
+            log_file, maxBytes=max_bytes, backupCount=backup_count, encoding=encoding, delay=True
+        )
 
         formatter = _build_formatter(
             use_json_format=use_json_format,
@@ -206,6 +224,8 @@ class RotatingFileHandler:
 
         handler.setFormatter(formatter)
         handler.setLevel(log_level)
+        if use_json_format:
+            handler.addFilter(_SkipTextOnly())
 
         return handler
 
@@ -220,7 +240,8 @@ def create_file_handler(
 
     Args:
         log_file: Path to the log file
-        mode: File opening mode ('w' or 'a')
+        mode: File opening mode ('w' or 'a'). Ignored with rotation, which
+              always appends.
         max_file_size: Maximum file size in bytes (None = no rotation)
         backup_count: Number of backup files to keep
         **kwargs: Additional arguments passed to handler creation

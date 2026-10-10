@@ -12,7 +12,8 @@ A Python logging library with colored terminal output, file management, progress
 
 - **Rich Console Output** — Colored terminal logging via the Rich library
 - **Flexible Configuration** — `LoggerConfig` dataclass for per-logger overrides; simple `initialize()` / `get_logger()` API for common cases
-- **File Logging** — Separate or merged file strategies with configurable rotation
+- **File Logging** — Separate or merged file strategies with size-based rotation
+- **Structured Output** — Optional JSON Lines file with your own fields (`extra=`, bound context) for parsing and querying
 - **Progress Tracking** — Integrated progress bars via `ProgressTracker`
 - **Multi-Module Coordination** — `LoggerManager` for consistent logging across modules
 - **ML/Training Utilities** — `TrainingLogger` plugin for experiment logging
@@ -101,7 +102,7 @@ db_logger.debug("Executing query: SELECT ...")
 | Field | Applies to |
 |---|---|
 | `name`, `log_level`, `propagate`, `console_output`, `show_location` | The logger itself |
-| `log_file`, `file_mode`, `file_format`, `log_format`, `date_format`, `encoding` | The logger's own file (`log_file`). `file_format` falls back to the manager's value when left as `None` |
+| `log_file`, `file_mode`, `file_format`, `max_file_size`, `backup_count`, `log_format`, `date_format`, `encoding` | The logger's own file (`log_file`). `file_format`, `max_file_size` and `backup_count` fall back to the manager's values when left as `None` |
 | `use_color`, `enable_rich_tracebacks` | The logger's own console handler, i.e. only with `LoggerManager(shared_console=False)` |
 | `use_accelerate` | Drops this logger's records on non-main processes of a Hugging Face `accelerate` run, once `Accelerator()` has been created |
 
@@ -155,6 +156,23 @@ handler = create_file_handler(
 
 Files hold plain text: paired Rich tags such as `[bold red]alert[/bold red]` color the console but are removed from file output. Brackets that are not a closed style pair (`arr[i]`, `[1/3]`, `[epoch 1]`) are left as written. Pass `strip_markup=False` to `create_file_handler()` to keep the tags.
 
+### Rotation
+
+For long runs, cap the file size. When the file reaches `max_file_size` bytes it is renamed to `app.log.1` (older ones shift to `.2`, `.3`, ...) and a fresh file is started; `backup_count` old files are kept.
+
+```python
+from advlog import initialize
+
+initialize(
+    output_dir="./logs",
+    session_name="train",
+    max_file_size=50 * 1024 * 1024,  # 50 MB
+    backup_count=3,
+)
+```
+
+`max_file_size` / `backup_count` are also accepted by `LoggerManager`, `LoggerConfig`, `create_file_handler()` and `create_file_handlers()`, and apply to the `.jsonl` file too. A rotating file is always appended to, so `file_mode="w"` has no effect on it.
+
 ### Structured (JSON Lines) output
 
 Set `file_format` to get a machine-readable log next to (or instead of) the text log:
@@ -188,6 +206,32 @@ import pandas as pd
 df = pd.read_json("logs/train.jsonl", lines=True)
 errors = df[df["level"] == "ERROR"]
 ```
+
+Lines meant only for human eyes (separators, banners) can be kept out of the `.jsonl` file:
+
+```python
+log.info("=" * 60, extra={"text_only": True})  # console and text log only
+```
+
+### Context fields on every record
+
+Bind fields once and they are attached to every record from every logger, as if passed via `extra=` each time. This is what lets you tell runs apart after merging their logs.
+
+```python
+from advlog import initialize, bind_context, unbind_context, clear_context
+
+initialize(session_name="train", file_format="both", context={"run_id": "exp-42", "git_sha": "ab6e876"})
+
+bind_context(epoch=3)     # add or update fields later
+unbind_context("epoch")   # remove some
+clear_context()           # remove all
+```
+
+```json
+{"timestamp": "...", "level": "INFO", "logger": "train", "message": "step done", "module": "train", "function": "fit", "line": 88, "extra": {"run_id": "exp-42", "git_sha": "ab6e876", "epoch": 3}}
+```
+
+An explicit `extra=` on a call wins over a bound field of the same name. Bound fields are also available to custom text formats, e.g. `LoggerConfig(log_format="%(asctime)s %(run_id)s %(message)s")`. Names of built-in record attributes (`message`, `name`, `levelname`, ...) are rejected.
 
 ### Smart log file naming
 
@@ -239,7 +283,7 @@ trainer.log_train_step(
 )
 ```
 
-`log_configuration`, `log_train_step`, and `log_evaluation_results` attach their data as `extra` fields, so with `file_format="json"` or `"both"` each one becomes a queryable record (`extra.event` is `"config"`, `"train_step"`, or `"evaluation"`).
+`log_configuration`, `log_train_step`, and `log_evaluation_results` attach their data as `extra` fields, so with `file_format="json"` or `"both"` each one becomes a queryable record (`extra.event` is `"config"`, `"train_step"`, or `"evaluation"`). Their separator and per-key lines are marked `text_only`, so the `.jsonl` file gets one record per call rather than one per printed line.
 
 Records logged through `TrainingLogger` report the file and line of *your* call (visible with `show_location=True` and in the JSON `module` / `function` / `line` fields), not a location inside the helper.
 

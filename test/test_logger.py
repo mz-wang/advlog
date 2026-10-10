@@ -259,6 +259,154 @@ class TestCreateFileHandlers:
                 h.close()
 
 
+class TestRotation:
+    """Test size-based rotation through the high-level entry points."""
+
+    def test_manager_rotates_shared_file(self):
+        """max_file_size on the manager rotates the shared file and keeps backups."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            manager = LoggerManager(
+                shared_console=False, shared_file=str(shared), file_format="both", max_file_size=300, backup_count=2
+            )
+            log = manager.register_logger("rot_shared", file_strategy="merged", use_console=False)
+            assert log.handlers and all(isinstance(h, logging.handlers.RotatingFileHandler) for h in log.handlers)
+            for i in range(30):
+                log.info("message number %d padded out to make the file grow", i)
+            LoggerManager.reset()
+
+            names = sorted(p.name for p in Path(tmpdir).iterdir())
+            assert names == [
+                "shared.jsonl",
+                "shared.jsonl.1",
+                "shared.jsonl.2",
+                "shared.log",
+                "shared.log.1",
+                "shared.log.2",
+            ]
+            # Rotated JSON files still hold whole records
+            assert _read_jsonl(Path(tmpdir) / "shared.jsonl.1")
+
+    def test_no_rotation_by_default(self):
+        """Without max_file_size the plain file handler is used."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            manager = LoggerManager(shared_console=False, shared_file=str(Path(tmpdir) / "shared.log"))
+            log = manager.register_logger("rot_none", file_strategy="merged", use_console=False)
+            assert type(log.handlers[0]) is logging.FileHandler
+            LoggerManager.reset()
+
+    def test_loggerconfig_overrides_rotation(self):
+        """LoggerConfig.max_file_size / backup_count override the manager's values."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            manager = LoggerManager(shared_console=False, max_file_size=1000, backup_count=5)
+            config = LoggerConfig(
+                name="rot_cfg",
+                log_file=str(Path(tmpdir) / "mod.log"),
+                console_output=False,
+                max_file_size=50,
+                backup_count=1,
+            )
+            handler = manager.register_logger(config=config).handlers[0]
+            assert isinstance(handler, logging.handlers.RotatingFileHandler)
+            assert handler.maxBytes == 50
+            assert handler.backupCount == 1
+
+            inherited = manager.register_logger(
+                "rot_inherit", file_strategy="separate", log_file=str(Path(tmpdir) / "other.log"), use_console=False
+            ).handlers[0]
+            assert inherited.maxBytes == 1000
+            assert inherited.backupCount == 5
+            LoggerManager.reset()
+
+    def test_rotating_handler_matches_plain_handler(self):
+        """Rotating files use the same line format and are created lazily."""
+        from advlog import create_file_handler
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            plain_file = Path(tmpdir) / "plain.log"
+            rotating_file = Path(tmpdir) / "rotating.log"
+            plain = create_file_handler(str(plain_file))
+            rotating = create_file_handler(str(rotating_file), max_file_size=10_000)
+            assert not rotating_file.exists()
+
+            record = logging.LogRecord("test", logging.INFO, "file.py", 1, "same line", (), None)
+            plain.emit(record)
+            rotating.emit(record)
+            plain.close()
+            rotating.close()
+            assert plain_file.read_text() == rotating_file.read_text()
+            assert "|INFO    | same line" in rotating_file.read_text()
+
+
+class TestContext:
+    """Test context fields bound to every record."""
+
+    def test_bound_fields_reach_every_logger(self):
+        """Bound fields are attached to records of loggers registered before and after."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            manager = LoggerManager(shared_console=False, shared_file=str(shared), file_format="json")
+            before = manager.register_logger("ctx_before", file_strategy="merged")
+            manager.bind_context(run_id="exp-42", seed=7)
+            after = manager.register_logger("ctx_after", file_strategy="merged")
+            before.info("one")
+            after.info("two", extra={"step": 3})
+            LoggerManager.reset()
+
+            records = _read_jsonl(shared.with_suffix(".jsonl"))
+            assert records[0]["extra"] == {"run_id": "exp-42", "seed": 7}
+            assert records[1]["extra"] == {"step": 3, "run_id": "exp-42", "seed": 7}
+
+    def test_explicit_extra_wins(self):
+        """A field passed via extra= overrides the bound value for that call only."""
+        manager = LoggerManager(shared_console=False, context={"stage": "train"})
+        log = manager.register_logger("ctx_explicit", file_strategy="none", use_console=False)
+        records = []
+        handler = logging.Handler()
+        handler.emit = records.append
+        log.addHandler(handler)
+
+        log.info("overridden", extra={"stage": "eval"})
+        log.info("default")
+        assert [r.stage for r in records] == ["eval", "train"]
+
+    def test_unbind_and_clear(self):
+        """unbind_context removes named fields; clear_context removes all."""
+        manager = LoggerManager(shared_console=False)
+        manager.bind_context(a=1, b=2, c=3)
+        manager.unbind_context("a", "missing")
+        assert manager.get_context() == {"b": 2, "c": 3}
+        manager.clear_context()
+        assert manager.get_context() == {}
+
+    def test_reserved_names_rejected(self):
+        """Fields that would overwrite LogRecord attributes are rejected and change nothing."""
+        manager = LoggerManager(shared_console=False, context={"run_id": "keep"})
+        with pytest.raises(ValueError):
+            manager.bind_context(ok=1, message="clobber")
+        with pytest.raises(ValueError):
+            LoggerManager(shared_console=False, context={"levelname": "clobber"})
+        assert manager.get_context() == {"run_id": "keep"}
+
+    def test_context_survives_reinitialize_until_replaced(self):
+        """Re-initializing keeps the context unless a new one is passed."""
+        manager = LoggerManager(shared_console=False, context={"run_id": "first"})
+        LoggerManager(shared_console=False)
+        assert manager.get_context() == {"run_id": "first"}
+        LoggerManager(shared_console=False, context={"run_id": "second"})
+        assert manager.get_context() == {"run_id": "second"}
+        LoggerManager(shared_console=False, context={})
+        assert manager.get_context() == {}
+
+    def test_unregistered_logger_stops_receiving_context(self):
+        """Unregistering detaches the context filter from the logger."""
+        manager = LoggerManager(shared_console=False, context={"run_id": "x"})
+        log = manager.register_logger("ctx_unregister", file_strategy="none", use_console=False)
+        assert log.filters
+        manager.unregister_logger("ctx_unregister")
+        assert log.filters == []
+
+
 class TestReinitialize:
     """Test that re-initializing applies the new settings in full."""
 
@@ -306,6 +454,19 @@ class TestFileContent:
 
             assert shared.read_text().rstrip().endswith("| alert at arr[i] [1/3]")
             assert _read_jsonl(shared.with_suffix(".jsonl"))[0]["message"] == "alert at arr[i] [1/3]"
+
+    def test_text_only_records_skip_json(self):
+        """Records marked text_only reach the text file but not the JSON file."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            manager = LoggerManager(shared_console=False, shared_file=str(shared), file_format="both")
+            log = manager.register_logger("content_text_only", file_strategy="merged", use_console=False)
+            log.info("=" * 20, extra={"text_only": True})
+            log.info("real record")
+            LoggerManager.reset()
+
+            assert shared.read_text().count("\n") == 2
+            assert [r["message"] for r in _read_jsonl(shared.with_suffix(".jsonl"))] == ["real record"]
 
 
 class TestLoggerConfigFields:
@@ -422,6 +583,8 @@ class TestLoggerConfigFields:
             name="cfg_round_trip",
             log_file="logs/x.log",
             file_format="both",
+            max_file_size=1024,
+            backup_count=2,
             use_color=False,
             log_format="%(message)s",
             date_format="%H:%M",
@@ -505,6 +668,56 @@ class TestGlobalAPI:
             assert jsonl_files[0].stem == log_files[0].stem
             records = _read_jsonl(jsonl_files[0])
             assert records[0]["extra"]["params"] == {"lr": 0.001, "batch_size": 32}
+
+    def test_initialize_with_rotation_and_context(self):
+        """initialize() passes rotation settings and context through to the log files."""
+        from advlog import get_logger, initialize, reset
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = Path(tmpdir) / "run.log"
+            initialize(
+                log_file_path=str(log_file),
+                file_format="both",
+                max_file_size=400,
+                backup_count=1,
+                context={"run_id": "exp-42"},
+            )
+            log = get_logger("init_rotation")
+            for i in range(20):
+                log.info("line %d of a run that outgrows its file", i)
+            reset()
+
+            assert (Path(tmpdir) / "run.log.1").exists()
+            assert not (Path(tmpdir) / "run.log.2").exists()
+            records = _read_jsonl(log_file.with_suffix(".jsonl"))
+            assert records and all(r["extra"] == {"run_id": "exp-42"} for r in records)
+
+    def test_bind_context_api(self):
+        """bind_context works before initialize() and survives it; reset() clears it."""
+        from advlog import bind_context, clear_context, get_logger, initialize, reset, unbind_context
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            log_file = Path(tmpdir) / "run.log"
+            bind_context(run_id="early", stage="setup")
+            initialize(log_file_path=str(log_file), file_format="json")
+            log = get_logger("init_context")
+            log.info("first")
+            unbind_context("stage")
+            bind_context(epoch=2)
+            log.info("second")
+            clear_context()
+            log.info("third")
+            reset()
+
+            records = _read_jsonl(log_file.with_suffix(".jsonl"))
+            assert records[0]["extra"] == {"run_id": "early", "stage": "setup"}
+            assert records[1]["extra"] == {"run_id": "early", "epoch": 2}
+            assert "extra" not in records[2]
+
+            initialize(enable_file_logging=False)
+            from advlog import api
+
+            assert api._LOGGER_MANAGER.get_context() == {}
 
     def test_disabling_file_logging_stops_writing(self):
         """initialize(enable_file_logging=False) detaches the log file set up earlier."""

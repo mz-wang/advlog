@@ -111,6 +111,16 @@ class TestTrainingLoggerStructuredData:
         assert {r.funcName for r in records} == {"test_records_report_callers_location"}
         assert {r.filename for r in records} == {"test_training.py"}
 
+    def test_display_lines_marked_text_only(self, trainer_and_records):
+        trainer, records = trainer_and_records
+        trainer.log_configuration({"lr": 0.001, "model": {"depth": 50}})
+        trainer.log_evaluation_results({"accuracy": 0.95})
+
+        structured = [r for r in records if not getattr(r, "text_only", False)]
+        assert [r.event for r in structured] == ["config", "evaluation"]
+        # header + 3 config lines + footer, header + 1 metric line + footer
+        assert len(records) == 8
+
     def test_records_serialize_to_json(self, trainer_and_records):
         trainer, records = trainer_and_records
         trainer.log_train_step(
