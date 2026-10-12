@@ -15,8 +15,10 @@
 """Configuration management for the logging system."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
+
+from advlog.handlers.file import DEFAULT_DATE_FORMAT, DEFAULT_LOG_FORMAT
 
 
 @dataclass
@@ -32,15 +34,30 @@ class LoggerConfig:
         log_file: Path to an individual log file for this logger
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         file_mode: File opening mode ('w' for overwrite, 'a' for append)
-        use_color: Enable colored console output
+        file_format: "text", "json" (JSON Lines), or "both". None inherits
+                     the manager's setting.
+        max_file_size: Rotate the log file when it reaches this many bytes.
+                       None inherits the manager's setting.
+        backup_count: Number of rotated files to keep. None inherits the
+                      manager's setting.
+        use_color: Enable colored console output. Applies only when the
+                   manager does not use a shared console (a shared console
+                   has one color setting for everyone).
         console_output: Enable console output
-        enable_rich_tracebacks: Enable rich formatted tracebacks
+        enable_rich_tracebacks: Enable rich formatted tracebacks. Applies only
+                                when the manager does not use a shared console.
         show_location: Show source file/line in console sidebar
-        date_format: Date format string for file log messages
-        log_format: Format string for file log messages
-        encoding: File encoding
+        date_format: Date format string for this logger's own log file
+        log_format: Format string for this logger's own log file
+        encoding: Encoding of this logger's own log file
         propagate: Whether log records propagate to the root logger
-        use_accelerate: Suppress output on non-main processes (distributed training)
+        use_accelerate: Suppress output on non-main processes of an
+                        ``accelerate`` run (distributed training)
+
+    The file settings (``file_mode``, ``file_format``, ``max_file_size``,
+    ``backup_count``, ``date_format``, ``log_format``, ``encoding``) apply to
+    the file named by ``log_file``; without ``log_file`` the logger has no
+    file of its own.
 
     Example:
         config = LoggerConfig(
@@ -57,6 +74,9 @@ class LoggerConfig:
     log_file: str | None = None
     log_level: str = "INFO"
     file_mode: str = "a"
+    file_format: str | None = None
+    max_file_size: int | None = None
+    backup_count: int | None = None
 
     # Console behaviour
     use_color: bool = True
@@ -65,8 +85,8 @@ class LoggerConfig:
     show_location: bool = False
 
     # File formatting
-    date_format: str = "%Y-%m-%d %H:%M:%S"
-    log_format: str = "%(asctime)s [%(levelname)s] %(message)s"
+    date_format: str = DEFAULT_DATE_FORMAT
+    log_format: str = DEFAULT_LOG_FORMAT
     encoding: str = "utf-8"
 
     # Misc
@@ -78,6 +98,9 @@ class LoggerConfig:
         self.log_level = self.log_level.upper()
         if self.log_level not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
             raise ValueError(f"Invalid log level: {self.log_level}")
+
+        if self.file_format is not None and self.file_format not in ["text", "json", "both"]:
+            raise ValueError(f"Invalid file format: {self.file_format}")
 
         if self.use_color:
             from advlog.utils.environment import supports_color
@@ -95,16 +118,7 @@ class LoggerConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary."""
-        return {
-            "name": self.name,
-            "log_file": self.log_file,
-            "log_level": self.log_level,
-            "file_mode": self.file_mode,
-            "use_color": self.use_color,
-            "console_output": self.console_output,
-            "show_location": self.show_location,
-            "propagate": self.propagate,
-        }
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, config_dict: dict[str, Any]) -> "LoggerConfig":

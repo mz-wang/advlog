@@ -1,4 +1,4 @@
-﻿# Copyright 2026 Mengzhao Wang
+# Copyright 2026 Mengzhao Wang
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,9 +14,12 @@
 
 """Custom formatters for log messages."""
 
+import json
 import logging
+import re
 from datetime import datetime
-from typing import Literal
+from functools import lru_cache
+from typing import Any, Literal
 
 __all__ = [
     "RichColorFormatter",
@@ -24,6 +27,83 @@ __all__ = [
     "IndentedFormatter",
     "JSONFormatter",
 ]
+
+# === Rich markup handling ===
+
+# An opening tag ([bold red]) or a closing tag ([/bold red], [/]), as Rich parses them
+_MARKUP_TAG = re.compile(r"\[(?:(/)([^\[\]]*)|([a-z#@][^\[\]]*))\]")
+
+
+@lru_cache(maxsize=256)
+def _is_rich_style(name: str) -> bool:
+    """Check whether a markup tag name is something Rich would render as a style.
+
+    Args:
+        name: Tag content without the brackets (e.g. "bold red")
+
+    Returns:
+        True if Rich treats the tag as styling rather than text
+    """
+    if name.startswith("@") or name.split("=", 1)[0].strip() == "link":
+        return True
+
+    try:
+        from rich.style import Style
+
+        Style.parse(name)
+    except Exception:
+        return False
+    return True
+
+
+def strip_rich_markup(text: str) -> str:
+    """Remove Rich style tags from a message so files hold what the console shows.
+
+    Only tags that come in pairs are removed (``[bold]x[/bold]``, ``[red]x[/]``).
+    A lone bracketed word such as ``arr[i]`` or ``[epoch 1]`` is left alone, so
+    ordinary text is never lost.
+
+    Args:
+        text: Message that may contain Rich markup
+
+    Returns:
+        Message without paired style tags
+    """
+    if "[/" not in text:
+        return text
+
+    open_tags: list[tuple[str, re.Match[str]]] = []
+    paired: list[re.Match[str]] = []
+
+    for match in _MARKUP_TAG.finditer(text):
+        if match.start() > 0 and text[match.start() - 1] == "\\":
+            continue  # escaped bracket, literal text
+
+        if match.group(1) is None:
+            name = match.group(3).strip()
+            if _is_rich_style(name):
+                # [link=url] is closed by [/link]
+                open_tags.append((name.split("=", 1)[0].strip(), match))
+            continue
+
+        name = match.group(2).strip()
+        for index in range(len(open_tags) - 1, -1, -1):
+            # A bare [/] closes the most recent tag
+            if not name or open_tags[index][0] == name:
+                paired += [open_tags.pop(index)[1], match]
+                break
+
+    if not paired:
+        return text
+
+    parts = []
+    position = 0
+    for match in sorted(paired, key=lambda m: m.start()):
+        parts.append(text[position : match.start()])
+        position = match.end()
+    parts.append(text[position:])
+    return "".join(parts)
+
 
 # === Base Formatters ===
 
@@ -93,16 +173,29 @@ class PlainFormatter(logging.Formatter):
     Args:
         fmt: Format string for log messages
         datefmt: Date format string (defaults based on use case)
+        strip_markup: Remove paired Rich style tags from the message
 
     Note:
         - For console output: defaults to yy/mm/dd HH:MM:SS
         - For file output: defaults to yyyy/mm/dd HH:MM:SS
     """
 
-    def __init__(self, fmt: str = "%(asctime)s [%(levelname)s] %(message)s", datefmt: str | None = None):
+    def __init__(
+        self,
+        fmt: str = "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt: str | None = None,
+        strip_markup: bool = False,
+    ):
         if datefmt is None:
             datefmt = "%y/%m/%d %H:%M:%S"
         super().__init__(fmt, datefmt)
+        self.strip_markup = strip_markup
+
+    def formatMessage(self, record: logging.LogRecord) -> str:
+        """Render the format string, stripping Rich markup first if enabled."""
+        if self.strip_markup:
+            record.message = strip_rich_markup(record.message)
+        return super().formatMessage(record)
 
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record as plain text.
@@ -127,6 +220,7 @@ class IndentedFormatter(logging.Formatter):
         datefmt: Date format string
         style: Format style ('%', '{', or '$')
         indent_size: Number of spaces to indent continuation lines
+        strip_markup: Remove paired Rich style tags from the message
 
     Example:
         formatter = IndentedFormatter(
@@ -146,9 +240,17 @@ class IndentedFormatter(logging.Formatter):
         datefmt: str | None = None,
         style: Literal["%", "{", "$"] = "%",
         indent_size: int = 27,
+        strip_markup: bool = False,
     ):
         super().__init__(fmt, datefmt, style)
         self.indent_size = indent_size
+        self.strip_markup = strip_markup
+
+    def formatMessage(self, record: logging.LogRecord) -> str:
+        """Render the format string, stripping Rich markup first if enabled."""
+        if self.strip_markup:
+            record.message = strip_rich_markup(record.message)
+        return super().formatMessage(record)
 
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record with indentation for multi-line messages.
@@ -169,22 +271,62 @@ class IndentedFormatter(logging.Formatter):
         return message
 
 
+# Attributes logging itself puts on a record. Anything else came from ``extra=``.
+# "message" and "asctime" are added by other formatters handling the same record;
+# "taskName" only exists on Python 3.12+.
+RESERVED_RECORD_ATTRS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
+    "message",
+    "asctime",
+    "taskName",
+}
+
+
+def _json_default(obj: Any) -> Any:
+    """Convert values json cannot serialize natively.
+
+    Args:
+        obj: Value rejected by the JSON encoder
+
+    Returns:
+        A JSON-serializable stand-in
+    """
+    if isinstance(obj, (set, frozenset)):
+        return list(obj)
+
+    # numpy scalars/arrays and torch tensors
+    tolist = getattr(obj, "tolist", None)
+    if callable(tolist):
+        try:
+            return tolist()
+        except Exception:
+            pass
+
+    return str(obj)
+
+
 class JSONFormatter(logging.Formatter):
     """Formatter that outputs log records as JSON.
 
     This is useful for structured logging and log aggregation systems.
+    Fields passed via ``extra=`` are collected under the ``"extra"`` key so
+    they can never overwrite the standard fields. Non-finite floats (NaN,
+    Infinity) are written as ``null`` to keep every line valid JSON.
 
     Args:
         include_extras: Whether to include extra fields from the log record
+        strip_markup: Remove paired Rich style tags from the message
 
     Example:
         formatter = JSONFormatter(include_extras=True)
-        # Output: {"time": "2024-01-01 12:00:00", "level": "INFO", "message": "test"}
+        logger.info("start", extra={"lr": 1e-3})
+        # Output: {"timestamp": "2024-01-01T12:00:00+08:00", "level": "INFO", ...,
+        #          "message": "start", "extra": {"lr": 0.001}}
     """
 
-    def __init__(self, include_extras: bool = True):
+    def __init__(self, include_extras: bool = True, strip_markup: bool = False):
         super().__init__()
         self.include_extras = include_extras
+        self.strip_markup = strip_markup
 
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record as JSON.
@@ -195,13 +337,15 @@ class JSONFormatter(logging.Formatter):
         Returns:
             JSON-formatted log message
         """
-        import json
+        message = record.getMessage()
+        if self.strip_markup:
+            message = strip_rich_markup(message)
 
-        log_data = {
-            "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+        log_data: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created).astimezone().isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": message,
             "module": record.module,
             "function": record.funcName,
             "line": record.lineno,
@@ -210,31 +354,25 @@ class JSONFormatter(logging.Formatter):
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
 
-        if self.include_extras:
-            for key, value in record.__dict__.items():
-                if key not in [
-                    "name",
-                    "msg",
-                    "args",
-                    "created",
-                    "filename",
-                    "funcName",
-                    "levelname",
-                    "levelno",
-                    "lineno",
-                    "module",
-                    "msecs",
-                    "message",
-                    "pathname",
-                    "process",
-                    "processName",
-                    "relativeCreated",
-                    "thread",
-                    "threadName",
-                    "exc_info",
-                    "exc_text",
-                    "stack_info",
-                ]:
-                    log_data[key] = value
+        if record.stack_info:
+            log_data["stack"] = self.formatStack(record.stack_info)
 
-        return json.dumps(log_data, ensure_ascii=False)
+        if self.include_extras:
+            extras = {key: value for key, value in record.__dict__.items() if key not in RESERVED_RECORD_ATTRS}
+            if extras:
+                log_data["extra"] = extras
+
+        try:
+            text = json.dumps(log_data, ensure_ascii=False, default=_json_default)
+        except (TypeError, ValueError):
+            # Unserializable keys or circular references: keep the record anyway
+            log_data["extra"] = repr(log_data.get("extra"))
+            text = json.dumps(log_data, ensure_ascii=False, default=_json_default)
+
+        # NaN/Infinity are not valid JSON and make strict parsers reject the
+        # line, so write them as null. The substring test only gates the
+        # re-encode; a message that merely contains the word passes through intact.
+        if "NaN" in text or "Infinity" in text:
+            text = json.dumps(json.loads(text, parse_constant=lambda _: None), ensure_ascii=False)
+
+        return text

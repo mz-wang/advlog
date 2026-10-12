@@ -15,7 +15,7 @@
 """Handler modules for different output targets."""
 
 from .console import ConsoleHandler, create_console_handler
-from .file import FileHandler, RotatingFileHandler, create_file_handler
+from .file import FileHandler, RotatingFileHandler, create_file_handler, create_file_handlers
 
 __all__ = [
     "ConsoleHandler",
@@ -23,4 +23,5 @@ __all__ = [
     "RotatingFileHandler",
     "create_console_handler",
     "create_file_handler",
+    "create_file_handlers",
 ]

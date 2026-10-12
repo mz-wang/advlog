@@ -35,6 +35,10 @@ try:
 except ImportError:
     TORCHINFO_AVAILABLE = False
 
+# Marks lines that only make sense to a human reader (separators, pretty-printed
+# values already carried as structured data elsewhere); JSON files skip them.
+_TEXT_ONLY = {"text_only": True}
+
 
 class TrainingLogger:
     """Logger with utilities for machine learning training.
@@ -43,11 +47,13 @@ class TrainingLogger:
     information such as configurations, model summaries, and
     training metrics.
 
-    Usage:
-        from core import AdvancedLogger
-        from plugins import TrainingLogger
+    Records report the location of your call, not of this class, and carry
+    their data as ``extra`` fields for JSON log files.
 
-        logger = AdvancedLogger().get_logger()
+    Usage:
+        from advlog import TrainingLogger, get_logger
+
+        logger = get_logger(__name__)
         trainer = TrainingLogger(logger)
 
         trainer.log_configuration(config)
@@ -71,50 +77,85 @@ class TrainingLogger:
             config: Configuration object (OmegaConf, dict, or any object)
             title: Section title for the log
 
+        The header line carries the whole configuration as structured data
+        (``extra["config"]``), so JSON log files hold it as a single record.
+
         Example:
             trainer.log_configuration(cfg, title="Training Config")
         """
-        self.logger.info(f"===== {title} =====")
+        # stacklevel: 2 reports the caller of this method; the helpers below
+        # sit one frame deeper and need 3
+        self.logger.info(
+            f"===== {title} =====",
+            extra={"event": "config", "title": title, "config": self._config_to_data(config)},
+            stacklevel=2,
+        )
 
         if OMEGACONF_AVAILABLE and hasattr(config, "__module__"):
             # Try to detect OmegaConf objects
             if "omegaconf" in config.__module__:
-                self.logger.info(OmegaConf.to_yaml(config))
+                self.logger.info(OmegaConf.to_yaml(config), extra=_TEXT_ONLY, stacklevel=2)
             else:
-                self._log_generic_config(config)
+                self._log_generic_config(config, stacklevel=3)
         elif isinstance(config, dict):
-            self._log_dict_config(config)
+            self._log_dict_config(config, stacklevel=3)
         else:
-            self._log_generic_config(config)
+            self._log_generic_config(config, stacklevel=3)
 
-        self.logger.info("=" * (len(title) + 12))
+        self.logger.info("=" * (len(title) + 12), extra=_TEXT_ONLY, stacklevel=2)
 
-    def _log_dict_config(self, config: dict[str, Any], indent: int = 0):
+    def _config_to_data(self, config: Any) -> Any:
+        """Convert a configuration object to plain data for structured logging.
+
+        Args:
+            config: Configuration object (OmegaConf, dict, or any object)
+
+        Returns:
+            Plain dict where possible, otherwise the string form
+        """
+        if OMEGACONF_AVAILABLE and "omegaconf" in getattr(config, "__module__", ""):
+            try:
+                return OmegaConf.to_container(config, resolve=True)
+            except Exception:
+                # Missing values or unresolvable interpolations
+                return OmegaConf.to_container(config, resolve=False)
+
+        if isinstance(config, dict):
+            return config
+
+        if hasattr(config, "__dict__"):
+            return {key: value for key, value in config.__dict__.items() if not key.startswith("_")}
+
+        return str(config)
+
+    def _log_dict_config(self, config: dict[str, Any], indent: int = 0, stacklevel: int = 2):
         """Log a dictionary configuration recursively.
 
         Args:
             config: Configuration dictionary
             indent: Current indentation level
+            stacklevel: Frames between the logging call and the user's call site
         """
         for key, value in config.items():
             if isinstance(value, dict):
-                self.logger.info("  " * indent + f"{key}:")
-                self._log_dict_config(value, indent + 1)
+                self.logger.info("  " * indent + f"{key}:", extra=_TEXT_ONLY, stacklevel=stacklevel)
+                self._log_dict_config(value, indent + 1, stacklevel + 1)
             else:
-                self.logger.info("  " * indent + f"{key}: {value}")
+                self.logger.info("  " * indent + f"{key}: {value}", extra=_TEXT_ONLY, stacklevel=stacklevel)
 
-    def _log_generic_config(self, config: Any):
+    def _log_generic_config(self, config: Any, stacklevel: int = 2):
         """Log a generic configuration object.
 
         Args:
             config: Configuration object
+            stacklevel: Frames between the logging call and the user's call site
         """
         if hasattr(config, "__dict__"):
             for key, value in config.__dict__.items():
                 if not key.startswith("_"):
-                    self.logger.info(f"{key}: {value}")
+                    self.logger.info(f"{key}: {value}", extra=_TEXT_ONLY, stacklevel=stacklevel)
         else:
-            self.logger.info(str(config))
+            self.logger.info(str(config), extra=_TEXT_ONLY, stacklevel=stacklevel)
 
     def log_model_summary(
         self, model: Any, input_size: tuple, module_name: str | None = None, depth: int = 3, verbose: int = 0
@@ -134,22 +175,22 @@ class TrainingLogger:
             trainer.log_model_summary(model, (1, 3, 224, 224), "ResNet50")
         """
         if not TORCHINFO_AVAILABLE:
-            self.logger.warning("torchinfo not available. Install with: pip install torchinfo")
+            self.logger.warning("torchinfo not available. Install with: pip install torchinfo", stacklevel=2)
             return
 
         if module_name:
-            self.logger.info(f"====== Model Summary: {module_name} ======")
+            self.logger.info(f"====== Model Summary: {module_name} ======", extra=_TEXT_ONLY, stacklevel=2)
         else:
-            self.logger.info("====== Model Summary ======")
+            self.logger.info("====== Model Summary ======", extra=_TEXT_ONLY, stacklevel=2)
 
         try:
             model_stats = summary(model, input_size=input_size, depth=depth, verbose=verbose)
             model_summary = str(model_stats)
-            self.logger.info(model_summary)
+            self.logger.info(model_summary, extra={"event": "model_summary", "module_name": module_name}, stacklevel=2)
         except Exception as e:
-            self.logger.error(f"Failed to generate model summary: {e}")
+            self.logger.error(f"Failed to generate model summary: {e}", stacklevel=2)
 
-        self.logger.info("=" * 30)
+        self.logger.info("=" * 30, extra=_TEXT_ONLY, stacklevel=2)
 
     def log_train_step(
         self,
@@ -195,8 +236,20 @@ class TrainingLogger:
         else:
             message = f"[{epoch}/{total_epochs}][{batch}/{total_batches}] {loss_str}, in {time_elapsed:.2f}s"
 
-        # Log to console/file
-        self.logger.info(message)
+        # Log to console/file. The extra fields are what JSON log files record.
+        self.logger.info(
+            message,
+            extra={
+                "event": "train_step",
+                "epoch": epoch,
+                "total_epochs": total_epochs,
+                "batch": batch,
+                "total_batches": total_batches,
+                "metrics": {**loss_dict, **(additional_metrics or {})},
+                "time_elapsed": time_elapsed,
+            },
+            stacklevel=2,
+        )
 
         # Log to CSV if requested
         if csv_path:
@@ -243,7 +296,8 @@ class TrainingLogger:
                 row = [epoch, batch] + list(all_metrics.values())
                 writer.writerow(row)
         except Exception as e:
-            self.logger.error(f"Failed to write to CSV file {csv_path}: {e}")
+            # Called from log_train_step, so the user's call is three frames up
+            self.logger.error(f"Failed to write to CSV file {csv_path}: {e}", stacklevel=3)
 
     def log_evaluation_results(
         self, metrics: dict[str, float], epoch: int | None = None, title: str = "Evaluation Results"
@@ -261,18 +315,20 @@ class TrainingLogger:
                 epoch=10
             )
         """
+        extra = {"event": "evaluation", "title": title, "epoch": epoch, "metrics": metrics}
+
         if epoch is not None:
-            self.logger.info(f"===== {title} (Epoch {epoch}) =====")
+            self.logger.info(f"===== {title} (Epoch {epoch}) =====", extra=extra, stacklevel=2)
         else:
-            self.logger.info(f"===== {title} =====")
+            self.logger.info(f"===== {title} =====", extra=extra, stacklevel=2)
 
         for metric_name, value in metrics.items():
             if isinstance(value, float):
-                self.logger.info(f"  {metric_name}: {value:.4f}")
+                self.logger.info(f"  {metric_name}: {value:.4f}", extra=_TEXT_ONLY, stacklevel=2)
             else:
-                self.logger.info(f"  {metric_name}: {value}")
+                self.logger.info(f"  {metric_name}: {value}", extra=_TEXT_ONLY, stacklevel=2)
 
-        self.logger.info("=" * (len(title) + 12))
+        self.logger.info("=" * (len(title) + 12), extra=_TEXT_ONLY, stacklevel=2)
 
     def cache_history(self, epoch: int, batch: int, loss: float):
         """Cache training history for later analysis.

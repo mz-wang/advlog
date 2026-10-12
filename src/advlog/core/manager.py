@@ -16,10 +16,12 @@
 
 import logging
 import threading
+from typing import Any
 
 from advlog.core.config import LoggerConfig
+from advlog.core.filters import ContextFilter, MainProcessFilter
 from advlog.handlers.console import create_console_handler
-from advlog.handlers.file import create_file_handler
+from advlog.handlers.file import FILE_FORMATS, create_file_handlers
 from advlog.utils.console import get_shared_console
 from advlog.utils.rich_compat import RICH_AVAILABLE, Console
 
@@ -77,12 +79,18 @@ class LoggerManager:
         use_color: bool = True,
         show_location: bool = False,
         file_mode: str = "w",
+        file_format: str = "text",
+        max_file_size: int | None = None,
+        backup_count: int = 5,
+        context: dict[str, Any] | None = None,
     ):
         """Initialize the logger manager.
 
         Supports re-initialization to update global settings mid-run.
         If already initialized, existing loggers will be updated to use
-        the new shared handlers.
+        the new shared handlers. Every call applies the full set of
+        arguments: re-initializing without ``shared_file`` detaches and
+        closes the shared file.
 
         Args:
             shared_console: Whether all loggers share the same console handler
@@ -92,19 +100,37 @@ class LoggerManager:
             use_color: Enable colored console output
             show_location: Show source location (file:line) in console sidebar
             file_mode: File opening mode ('w' for overwrite, 'a' for append)
+            file_format: File output format: "text" (human-readable), "json"
+                         (JSON Lines, written with a ``.jsonl`` extension), or
+                         "both" (text file plus a ``.jsonl`` file next to it)
+            max_file_size: Rotate log files when they reach this many bytes
+                           (None = no rotation). Rotating files are always
+                           appended to, regardless of file_mode.
+            backup_count: Number of rotated files to keep
+            context: Fields attached to every record (e.g. run id). None
+                     keeps the context already bound; see bind_context().
         """
         # Initialize internal storage ONLY ONCE
         if not hasattr(self, "_internal_init"):
             self.loggers: dict[str, logging.Logger] = {}
             self._logger_strategies: dict[str, dict] = {}
             self._console_handler: logging.Handler | None = None
-            self._shared_file_handler: logging.Handler | None = None
+            self._shared_file_handlers: list[logging.Handler] = []
             self._console: Console | None = None
+            self._context_filter = ContextFilter()
             self._internal_init = True
+
+        if file_format not in FILE_FORMATS:
+            raise ValueError(f"Invalid file format: {file_format!r} (expected one of {FILE_FORMATS})")
+
+        if context is not None:
+            replacement = ContextFilter()
+            replacement.bind(**context)  # validates before anything is changed
+            self._context_filter.fields = replacement.fields
 
         # Capture old handlers for cleanup if re-initializing
         old_console = self._console_handler
-        old_file = self._shared_file_handler
+        old_files = list(self._shared_file_handlers)
 
         self.shared_console = shared_console
         self.shared_file = shared_file
@@ -113,29 +139,41 @@ class LoggerManager:
         self.use_color = use_color
         self.show_location = show_location
         self.file_mode = file_mode
+        self.file_format = file_format
+        self.max_file_size = max_file_size
+        self.backup_count = backup_count
+
+        # The shared console has a single color setting, used by every
+        # handler (and progress bar) that draws on it
+        if RICH_AVAILABLE:
+            get_shared_console().no_color = not use_color
 
         # Initialize shared console if needed
         if shared_console:
             self._init_shared_console()
 
-        # Initialize shared file if provided
+        # Initialize shared file if provided; otherwise drop the previous one
+        # (_refresh_loggers detaches and closes it)
         if shared_file:
             self._init_shared_file()
+        else:
+            self._shared_file_handlers = []
 
         # If already initialized previously, we need to refresh all existing loggers
         if hasattr(self, "_initialized") and self._initialized:
-            self._refresh_loggers(old_console, old_file)
+            self._refresh_loggers(old_console, old_files)
 
         self._initialized = True
 
-    def _refresh_loggers(self, old_console=None, old_file=None):
+    def _refresh_loggers(self, old_console=None, old_files=()):
         """Update all registered loggers with new handlers."""
         for name, logger in self.loggers.items():
             # Remove old handlers if they are still attached
             if old_console and old_console in logger.handlers:
                 logger.removeHandler(old_console)
-            if old_file and old_file in logger.handlers:
-                logger.removeHandler(old_file)
+            for old_file in old_files:
+                if old_file in logger.handlers:
+                    logger.removeHandler(old_file)
 
             # Get the strategy used when this logger was registered
             strategy = self._logger_strategies.get(name, {})
@@ -147,14 +185,16 @@ class LoggerManager:
                 if self._console_handler not in logger.handlers:
                     logger.addHandler(self._console_handler)
 
-            # Add new merged file handler if applicable
-            if file_strategy == "merged" and self._shared_file_handler:
-                if self._shared_file_handler not in logger.handlers:
-                    logger.addHandler(self._shared_file_handler)
+            # Add new merged file handlers if applicable
+            if file_strategy == "merged":
+                for handler in self._shared_file_handlers:
+                    if handler not in logger.handlers:
+                        logger.addHandler(handler)
 
-        # Close old file handler if it was replaced
-        if old_file and old_file != self._shared_file_handler:
-            old_file.close()
+        # Close old file handlers that were replaced
+        for old_file in old_files:
+            if old_file not in self._shared_file_handlers:
+                old_file.close()
 
     def _init_shared_console(self):
         """Initialize shared console handler."""
@@ -170,14 +210,51 @@ class LoggerManager:
         )
 
     def _init_shared_file(self):
-        """Initialize shared file handler."""
+        """Initialize shared file handler(s)."""
         if self.shared_file:
-            self._shared_file_handler = create_file_handler(
+            self._shared_file_handlers = create_file_handlers(
                 log_file=self.shared_file,
+                file_format=self.file_format,
                 mode=self.file_mode,
+                max_file_size=self.max_file_size,
+                backup_count=self.backup_count,
                 log_level=self.file_log_level,
                 show_location=self.show_location,
             )
+
+    def bind_context(self, **fields: Any) -> None:
+        """Attach fields to every record of every managed logger.
+
+        Bound fields behave like ``extra=`` passed on each call; an explicit
+        ``extra=`` on a call wins over the bound value.
+
+        Args:
+            **fields: Field names and values (e.g. run_id="exp-42")
+
+        Example:
+            manager.bind_context(run_id="exp-42", git_sha="ab6e876")
+        """
+        self._context_filter.bind(**fields)
+
+    def unbind_context(self, *keys: str) -> None:
+        """Stop attaching the given context fields.
+
+        Args:
+            *keys: Field names to remove
+        """
+        self._context_filter.unbind(*keys)
+
+    def clear_context(self) -> None:
+        """Stop attaching any context fields."""
+        self._context_filter.clear()
+
+    def get_context(self) -> dict[str, Any]:
+        """Get the currently bound context fields.
+
+        Returns:
+            Copy of the bound fields
+        """
+        return dict(self._context_filter.fields)
 
     def register_logger(
         self,
@@ -259,31 +336,62 @@ class LoggerManager:
         logger.setLevel(log_level)
         logger.propagate = config.propagate if config is not None else False
 
-        # Clear any existing handlers
+        # Clear any existing handlers and filters left by an earlier registration
         logger.handlers.clear()
+        for old_filter in logger.filters[:]:
+            if isinstance(old_filter, (ContextFilter, MainProcessFilter)):
+                logger.removeFilter(old_filter)
+
+        logger.addFilter(self._context_filter)
+        if config is not None and config.use_accelerate:
+            logger.addFilter(MainProcessFilter())
 
         # Add console handler
         if use_console and self.shared_console and self._console_handler:
             logger.addHandler(self._console_handler)
         elif use_console and not self.shared_console:
+            use_color = self.use_color and (config is None or config.use_color)
+            # Same color setting as the manager: draw on the shared console
+            # (keeps progress bars intact). Otherwise the handler makes its own.
+            console = get_shared_console() if RICH_AVAILABLE and use_color == self.use_color else None
             console_handler = create_console_handler(
-                use_color=self.use_color,
+                use_color=use_color,
                 log_level=self.console_log_level,
                 show_location=effective_show_location,
+                enable_rich_tracebacks=config.enable_rich_tracebacks if config is not None else True,
+                console=console,
             )
             logger.addHandler(console_handler)
 
         # Add file handler based on strategy
         if file_strategy == "separate" and log_file:
-            file_handler = create_file_handler(
+            # Per-logger file settings: config wins where it sets a value
+            file_options: dict[str, Any] = {
+                "file_format": self.file_format,
+                "mode": "a",
+                "max_file_size": self.max_file_size,
+                "backup_count": self.backup_count,
+            }
+            if config is not None:
+                file_options["mode"] = config.file_mode
+                file_options["encoding"] = config.encoding
+                file_options["date_format"] = config.date_format
+                file_options["log_format"] = config.log_format
+                for key in ("file_format", "max_file_size", "backup_count"):
+                    if getattr(config, key) is not None:
+                        file_options[key] = getattr(config, key)
+
+            file_handlers = create_file_handlers(
                 log_file=log_file,
-                mode=config.file_mode if config is not None else "a",
                 log_level=self.file_log_level,
                 show_location=effective_show_location,
+                **file_options,
             )
-            logger.addHandler(file_handler)
-        elif file_strategy == "merged" and self._shared_file_handler:
-            logger.addHandler(self._shared_file_handler)
+            for file_handler in file_handlers:
+                logger.addHandler(file_handler)
+        elif file_strategy == "merged":
+            for file_handler in self._shared_file_handlers:
+                logger.addHandler(file_handler)
 
         # Store logger
         self.loggers[name] = logger
@@ -319,13 +427,13 @@ class LoggerManager:
             self._console_handler.setLevel(level)
 
     def set_file_level(self, level: int):
-        """Change file log level for shared file handler.
+        """Change file log level for shared file handler(s).
 
         Args:
             level: New log level
         """
-        if self._shared_file_handler:
-            self._shared_file_handler.setLevel(level)
+        for handler in self._shared_file_handlers:
+            handler.setLevel(level)
 
     def unregister_logger(self, name: str):
         """Unregister and cleanup a logger.
@@ -338,12 +446,14 @@ class LoggerManager:
             # Remove handlers that are not shared
             handlers_to_remove = []
             for handler in logger.handlers:
-                if handler != self._console_handler and handler != self._shared_file_handler:
+                if handler != self._console_handler and handler not in self._shared_file_handlers:
                     handlers_to_remove.append(handler)
 
             for handler in handlers_to_remove:
                 logger.removeHandler(handler)
                 handler.close()
+
+            logger.removeFilter(self._context_filter)
 
             del self.loggers[name]
 
@@ -353,16 +463,18 @@ class LoggerManager:
             for handler in logger.handlers[:]:
                 logger.removeHandler(handler)
                 handler.close()
+            logger.removeFilter(self._context_filter)
 
         self.loggers.clear()
+        self._context_filter.clear()
 
         if self._console_handler:
             self._console_handler.close()
             self._console_handler = None
 
-        if self._shared_file_handler:
-            self._shared_file_handler.close()
-            self._shared_file_handler = None
+        for handler in self._shared_file_handlers:
+            handler.close()
+        self._shared_file_handlers = []
 
     @classmethod
     def reset(cls):
@@ -380,6 +492,7 @@ def create_logger_group(
     file_strategy: str = "separate",
     log_dir: str = "logs",
     use_color: bool = True,
+    file_format: str = "text",
 ) -> dict[str, logging.Logger]:
     """Create a group of loggers with coordinated output.
 
@@ -390,6 +503,7 @@ def create_logger_group(
         file_strategy: "separate", "merged", or "none"
         log_dir: Directory for separate log files
         use_color: Enable colored output
+        file_format: "text", "json" (JSON Lines), or "both"
 
     Returns:
         Dictionary mapping module names to logger instances
@@ -405,7 +519,9 @@ def create_logger_group(
         loggers["api"].info("API started")
         loggers["database"].info("DB connected")
     """
-    manager = LoggerManager(shared_console=shared_console, shared_file=shared_file, use_color=use_color)
+    manager = LoggerManager(
+        shared_console=shared_console, shared_file=shared_file, use_color=use_color, file_format=file_format
+    )
 
     loggers = {}
     for name in module_names:
