@@ -281,11 +281,36 @@ RESERVED_RECORD_ATTRS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).
 }
 
 
-def _json_default(obj: Any) -> Any:
+DEFAULT_MAX_ARRAY_SIZE = 1000
+
+
+def _element_count(obj: Any) -> int | None:
+    """Count the elements of an array-like object without converting it.
+
+    Args:
+        obj: numpy array, torch tensor, pandas Series, ...
+
+    Returns:
+        Number of elements, or None if the object does not say
+    """
+    numel = getattr(obj, "numel", None)  # torch: .size is a method, .numel() the count
+    if callable(numel):
+        try:
+            return int(numel())
+        except Exception:
+            return None
+
+    size = getattr(obj, "size", None)  # numpy, pandas
+    return size if isinstance(size, int) else None
+
+
+def _json_default(obj: Any, max_array_size: int | None = None) -> Any:
     """Convert values json cannot serialize natively.
 
     Args:
         obj: Value rejected by the JSON encoder
+        max_array_size: Arrays with more elements than this are replaced by a
+                        summary (shape, dtype, size). None writes them in full.
 
     Returns:
         A JSON-serializable stand-in
@@ -296,6 +321,16 @@ def _json_default(obj: Any) -> Any:
     # numpy scalars/arrays and torch tensors
     tolist = getattr(obj, "tolist", None)
     if callable(tolist):
+        if max_array_size is not None:
+            size = _element_count(obj)
+            if size is not None and size > max_array_size:
+                shape = getattr(obj, "shape", None)
+                return {
+                    "_type": "array_summary",
+                    "shape": list(shape) if shape is not None else None,
+                    "dtype": str(getattr(obj, "dtype", type(obj).__name__)),
+                    "size": size,
+                }
         try:
             return tolist()
         except Exception:
@@ -310,11 +345,16 @@ class JSONFormatter(logging.Formatter):
     This is useful for structured logging and log aggregation systems.
     Fields passed via ``extra=`` are collected under the ``"extra"`` key so
     they can never overwrite the standard fields. Non-finite floats (NaN,
-    Infinity) are written as ``null`` to keep every line valid JSON.
+    Infinity) are written as ``null`` to keep every line valid JSON. Arrays
+    and tensors larger than ``max_array_size`` elements are written as
+    ``{"_type": "array_summary", "shape": [...], "dtype": "...", "size": n}``
+    so one call cannot put megabytes into a single line.
 
     Args:
         include_extras: Whether to include extra fields from the log record
         strip_markup: Remove paired Rich style tags from the message
+        max_array_size: Largest array (in elements) written in full. None
+                        writes every array in full.
 
     Example:
         formatter = JSONFormatter(include_extras=True)
@@ -323,10 +363,16 @@ class JSONFormatter(logging.Formatter):
         #          "message": "start", "extra": {"lr": 0.001}}
     """
 
-    def __init__(self, include_extras: bool = True, strip_markup: bool = False):
+    def __init__(
+        self,
+        include_extras: bool = True,
+        strip_markup: bool = False,
+        max_array_size: int | None = DEFAULT_MAX_ARRAY_SIZE,
+    ):
         super().__init__()
         self.include_extras = include_extras
         self.strip_markup = strip_markup
+        self.max_array_size = max_array_size
 
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record as JSON.
@@ -362,12 +408,15 @@ class JSONFormatter(logging.Formatter):
             if extras:
                 log_data["extra"] = extras
 
+        def default(obj: Any) -> Any:
+            return _json_default(obj, self.max_array_size)
+
         try:
-            text = json.dumps(log_data, ensure_ascii=False, default=_json_default)
+            text = json.dumps(log_data, ensure_ascii=False, default=default)
         except (TypeError, ValueError):
             # Unserializable keys or circular references: keep the record anyway
             log_data["extra"] = repr(log_data.get("extra"))
-            text = json.dumps(log_data, ensure_ascii=False, default=_json_default)
+            text = json.dumps(log_data, ensure_ascii=False, default=default)
 
         # NaN/Infinity are not valid JSON and make strict parsers reject the
         # line, so write them as null. The substring test only gates the

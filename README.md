@@ -198,7 +198,13 @@ The `.jsonl` file holds one JSON object per line. Anything passed via `extra=` i
 {"timestamp": "2026-03-06T14:30:22.123456+08:00", "level": "INFO", "logger": "__main__", "message": "Run started", "module": "train", "function": "<module>", "line": 6, "extra": {"lr": 0.001, "batch_size": 32}}
 ```
 
-Values JSON cannot represent (paths, sets, NumPy arrays, tensors, arbitrary objects) are converted rather than dropped, and `NaN`/`Infinity` are written as `null` so every line stays valid JSON. `file_format` is also accepted by `LoggerManager`, `LoggerConfig`, and `create_logger_group`; `create_file_handlers()` builds the handlers directly.
+Values JSON cannot represent (paths, sets, NumPy arrays, tensors, arbitrary objects) are converted rather than dropped, and `NaN`/`Infinity` are written as `null` so every line stays valid JSON. Arrays and tensors with more than 1,000 elements are written as a summary instead of in full, so logging a field array cannot put megabytes into one line:
+
+```json
+"extra": {"field": {"_type": "array_summary", "shape": [1024, 1024], "dtype": "complex64", "size": 1048576}}
+```
+
+Use `JSONFormatter(max_array_size=...)` on your own handler to change the limit (`None` writes every array in full). `file_format` is also accepted by `LoggerManager`, `LoggerConfig`, and `create_logger_group`; `create_file_handlers()` builds the handlers directly.
 
 ```python
 import pandas as pd

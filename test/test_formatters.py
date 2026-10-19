@@ -203,6 +203,43 @@ class TestJSONFormatter:
         data = json.loads(JSONFormatter().format(record))
         assert data["extra"] == {"values": [1, 2, 3]}
 
+    def test_large_arrays_written_as_summary(self):
+        class NumpyLike:
+            def __init__(self, n):
+                self.size, self.shape, self.dtype = n, (n,), "float64"
+
+            def tolist(self):
+                return [0.0] * self.size
+
+        class TensorLike:
+            shape, dtype = (2, 3, 1000), "torch.float32"
+
+            def numel(self):
+                return 6000
+
+            def size(self):  # torch: a method returning the shape
+                return self.shape
+
+            def tolist(self):
+                raise AssertionError("large tensor converted in full")
+
+        record = _record()
+        record.small = NumpyLike(1000)
+        record.large = NumpyLike(1001)
+        record.tensor = TensorLike()
+        data = json.loads(JSONFormatter().format(record))
+        assert data["extra"]["small"] == [0.0] * 1000
+        assert data["extra"]["large"] == {"_type": "array_summary", "shape": [1001], "dtype": "float64", "size": 1001}
+        assert data["extra"]["tensor"] == {
+            "_type": "array_summary",
+            "shape": [2, 3, 1000],
+            "dtype": "torch.float32",
+            "size": 6000,
+        }
+
+        full = json.loads(JSONFormatter(max_array_size=None).format(record))
+        assert full["extra"]["large"] == [0.0] * 1001
+
     def test_unencodable_extras_fall_back_to_repr(self):
         record = _record("kept")
         record.bad_keys = {(1, 2): "tuple key"}
