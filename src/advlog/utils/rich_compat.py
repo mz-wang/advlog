@@ -23,5 +23,5 @@ except ImportError:
     from typing import Any
 
     RICH_AVAILABLE = False
-    Console: Any = None  # type: ignore
-    Theme: Any = None  # type: ignore
+    Console: Any = None
+    Theme: Any = None

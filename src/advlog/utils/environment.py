@@ -52,7 +52,7 @@ def _is_jupyter() -> bool:
     """Check if running in Jupyter/IPython environment."""
     try:
         # Check for IPython
-        from IPython import get_ipython  # type: ignore
+        from IPython import get_ipython  # ty: ignore[unresolved-import]
 
         ipython = get_ipython()
         if ipython is None:
