@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Logger-level filters: bound context fields and main-process gating."""
+"""Logger and handler filters: bound context fields and main-process gating."""
 
 import logging
+import os
 import sys
 from typing import Any
 
@@ -79,29 +80,39 @@ class ContextFilter(logging.Filter):
 
 
 def is_main_process() -> bool:
-    """Check whether this is the main process of an ``accelerate`` run.
+    """Check whether this is the main process of a distributed run.
+
+    Asks accelerate first, once it has been initialized. Otherwise uses the
+    ``RANK`` environment variable set by torchrun, ``accelerate launch`` and
+    DeepSpeed, or ``LOCAL_RANK`` when only that one is set (on a multi-node
+    run every node then has a "main" process).
 
     Returns:
-        False only on a non-main process of an initialized accelerate run.
-        True when accelerate is not in use or has not been initialized yet.
+        False only on a process known not to be rank 0. True outside
+        distributed runs and when the rank cannot be read.
     """
     # Only look, never import: importing/initializing accelerate is the application's call
     state_module = sys.modules.get("accelerate.state")
-    if state_module is None:
-        return True
+    if state_module is not None and state_module.PartialState._shared_state:
+        return bool(state_module.PartialState().is_main_process)
 
-    partial_state = state_module.PartialState
-    if not partial_state._shared_state:
-        return True
+    for variable in ("RANK", "LOCAL_RANK"):
+        value = os.environ.get(variable)
+        if value is not None:
+            try:
+                return int(value) == 0
+            except ValueError:
+                return True
 
-    return bool(partial_state().is_main_process)
+    return True
 
 
 class MainProcessFilter(logging.Filter):
-    """Drop records on non-main processes of an ``accelerate`` run.
+    """Drop records on non-main processes of a distributed run.
 
-    Takes effect once accelerate's state exists (after ``Accelerator()`` or
-    ``PartialState()`` has been created); before that every process logs.
+    See is_main_process() for how the process is identified. With
+    accelerate and no rank variable in the environment, every process logs
+    until ``Accelerator()`` or ``PartialState()`` has been created.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:

@@ -696,6 +696,42 @@ class TestLoggerConfigFields:
 
         assert seen == ["accelerate not initialized", "main process", "logger without use_accelerate"]
 
+    @pytest.mark.parametrize(
+        ("env", "expected"),
+        [
+            ({}, True),
+            ({"RANK": "0"}, True),
+            ({"RANK": "3"}, False),
+            ({"RANK": "0", "LOCAL_RANK": "1"}, True),  # RANK wins: global, not per node
+            ({"LOCAL_RANK": "1"}, False),
+            ({"RANK": "not-a-number"}, True),
+        ],
+    )
+    def test_is_main_process_reads_rank_variables(self, monkeypatch, env, expected):
+        from advlog.core.filters import is_main_process
+
+        for variable in ("RANK", "LOCAL_RANK"):
+            monkeypatch.delenv(variable, raising=False)
+        for variable, value in env.items():
+            monkeypatch.setenv(variable, value)
+        assert is_main_process() is expected
+
+    def test_initialized_accelerate_wins_over_rank_variable(self, monkeypatch):
+        import sys
+        import types
+
+        from advlog.core.filters import is_main_process
+
+        class FakePartialState:
+            _shared_state = {"initialized": True}
+            is_main_process = True
+
+        fake_module = types.ModuleType("accelerate.state")
+        setattr(fake_module, "PartialState", FakePartialState)
+        monkeypatch.setitem(sys.modules, "accelerate.state", fake_module)
+        monkeypatch.setenv("RANK", "1")
+        assert is_main_process() is True
+
     def test_to_dict_round_trip(self):
         """to_dict() carries every field, so from_dict() rebuilds an equal config."""
         config = LoggerConfig(
@@ -797,6 +833,24 @@ class TestGlobalAPI:
         assert "registered 3 samples" in caplog.text
         assert "registered 3 samples" in next(tmp_path.rglob("*.log")).read_text()
         assert logging.getLogger("cap_api").handlers == []
+
+    @pytest.mark.parametrize(("rank", "writes"), [("0", True), ("1", False)])
+    def test_initialize_main_process_only(self, tmp_path, monkeypatch, rank, writes):
+        """Only rank 0 writes; other ranks leave no file behind (captured loggers included)."""
+        from advlog import get_logger, initialize, reset
+
+        monkeypatch.delenv("LOCAL_RANK", raising=False)
+        monkeypatch.setenv("RANK", rank)
+        initialize(log_file_path=tmp_path / "run.log", main_process_only=True, capture="mpo_lib")
+        get_logger("mpo_app").info("from app")
+        logging.getLogger("mpo_lib.io").info("from lib")
+        reset()
+
+        log_file = tmp_path / "run.log"
+        assert log_file.exists() is writes
+        if writes:
+            assert "from app" in log_file.read_text()
+            assert "from lib" in log_file.read_text()
 
     def test_initialize_with_both_formats(self):
         """initialize(file_format='both') adds a .jsonl file next to the text log."""

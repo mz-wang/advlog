@@ -66,6 +66,7 @@ def initialize(
     backup_count: int = 5,
     context: dict[str, Any] | None = None,
     capture: str | Iterable[str] = (),
+    main_process_only: bool = False,
 ) -> LoggerManager:
     """
     Initialize the global logging system.
@@ -107,6 +108,10 @@ def initialize(
                  (``mylib.io``, ...) are included and records keep propagating, so the
                  packages' own handlers and pytest's ``caplog`` are unaffected. "root"
                  captures every library. A later call replaces the list.
+        main_process_only: In a distributed run (torchrun, ``accelerate launch``,
+                 DeepSpeed), drop records on every process but rank 0, so one
+                 process writes the console and files. Rank comes from accelerate once
+                 initialized, else from the ``RANK`` / ``LOCAL_RANK`` environment variables.
 
     Returns:
         LoggerManager instance
@@ -192,6 +197,7 @@ def initialize(
         backup_count=backup_count,
         context=context,
         capture=capture,
+        main_process_only=main_process_only,
     )
 
     # Store configuration for later reference
@@ -209,6 +215,7 @@ def initialize(
         "max_file_size": max_file_size,
         "backup_count": backup_count,
         "capture": capture,
+        "main_process_only": main_process_only,
     }
 
     _INITIALIZED = True

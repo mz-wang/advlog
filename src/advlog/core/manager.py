@@ -87,6 +87,7 @@ class LoggerManager:
         backup_count: int = 5,
         context: dict[str, Any] | None = None,
         capture: str | Iterable[str] = (),
+        main_process_only: bool = False,
     ):
         """Initialize the logger manager.
 
@@ -116,6 +117,9 @@ class LoggerManager:
             capture: Names of standard library loggers (usually top-level
                      package names) whose records, and their children's,
                      go to the shared console and file. See capture().
+            main_process_only: Drop records on every process but rank 0 of a
+                     distributed run (torchrun, accelerate, DeepSpeed). Applies
+                     to every handler the manager creates; see is_main_process().
         """
         # Initialize internal storage ONLY ONCE
         if not hasattr(self, "_internal_init"):
@@ -125,6 +129,7 @@ class LoggerManager:
             self._shared_file_handlers: list[logging.Handler] = []
             self._console: Console | None = None
             self._context_filter = ContextFilter()
+            self._main_process_filter = MainProcessFilter()
             # Captured logger name -> its level before capture, restored on release
             self._captured: dict[str, int] = {}
             self._internal_init = True
@@ -151,6 +156,7 @@ class LoggerManager:
         self.file_format = file_format
         self.max_file_size = max_file_size
         self.backup_count = backup_count
+        self.main_process_only = main_process_only
 
         # The shared console has a single color setting, used by every
         # handler (and progress bar) that draws on it
@@ -252,7 +258,8 @@ class LoggerManager:
         The context filter also sits on each managed logger, but a logger's
         filters only see records logged on that very logger. Records that
         propagate up from child loggers (the captured-package case) are seen
-        by the handlers alone, so the handlers carry the filter too.
+        by the handlers alone, so the handlers carry the filter too. The
+        same goes for main-process gating.
 
         Args:
             handler: Handler created by this manager
@@ -261,6 +268,8 @@ class LoggerManager:
             The same handler
         """
         handler.addFilter(self._context_filter)
+        if self.main_process_only:
+            handler.addFilter(self._main_process_filter)
         return handler
 
     def capture(self, name: str) -> logging.Logger:

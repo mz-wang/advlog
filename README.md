@@ -130,7 +130,7 @@ db_logger.debug("Executing query: SELECT ...")
 | `name`, `log_level`, `propagate`, `console_output`, `show_location` | The logger itself |
 | `log_file`, `file_mode`, `file_format`, `max_file_size`, `backup_count`, `log_format`, `date_format`, `encoding` | The logger's own file (`log_file`). `file_format`, `max_file_size` and `backup_count` fall back to the manager's values when left as `None` |
 | `use_color`, `enable_rich_tracebacks` | The logger's own console handler, i.e. only with `LoggerManager(shared_console=False)` |
-| `use_accelerate` | Drops this logger's records on non-main processes of a Hugging Face `accelerate` run, once `Accelerator()` has been created |
+| `use_accelerate` | Drops this logger's records on non-main processes of a distributed run (see [Distributed runs](#distributed-runs)). `initialize(main_process_only=True)` does the same for everything |
 
 ### Register a group of loggers at once
 
@@ -265,6 +265,16 @@ clear_context()           # remove all
 
 An explicit `extra=` on a call wins over a bound field of the same name. Bound fields are also available to custom text formats, e.g. `LoggerConfig(log_format="%(asctime)s %(run_id)s %(message)s")`. Names of built-in record attributes (`message`, `name`, `levelname`, ...) are rejected.
 
+### Distributed runs
+
+With torchrun, `accelerate launch` or DeepSpeed every process runs your script. To have only rank 0 write to the console and log files:
+
+```python
+initialize(session_name="train", main_process_only=True)
+```
+
+The rank comes from accelerate once `Accelerator()` / `PartialState()` exists, and otherwise from the `RANK` environment variable (or `LOCAL_RANK` if only that is set), so records are filtered from the first line on. Other ranks create no log file.
+
 ### Smart log file naming
 
 ```python
@@ -351,7 +361,7 @@ python -m examples.real_world_demo.structured_demo   # JSON Lines output and que
 |---|---|---|
 | `config` | `omegaconf` | Advanced config file parsing |
 | `torch` | `torchinfo` | Model structure visualization |
-| `distributed` | `accelerate` | Main-process-only logging in multi-GPU runs (`LoggerConfig(use_accelerate=True)`) |
+| `distributed` | `accelerate` | Main-process detection from accelerate's own state. Not needed for `main_process_only`, which also reads `RANK` |
 
 ```bash
 pip install "advlog-core[config]"
