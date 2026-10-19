@@ -25,7 +25,6 @@ classifiers = [
 
 # Core dependencies
 dependencies = [
-    "omegaconf>=2.3.0",
     "rich>=10.0.0",
 ]
 

@@ -29,10 +29,9 @@ wheels = [
 
 [[package]]
 name = "advlog-core"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
-    { name = "omegaconf" },
     { name = "rich" },
 ]
 
@@ -68,7 +67,6 @@ dev = [
 requires-dist = [
     { name = "accelerate", marker = "extra == 'distributed'", specifier = ">=0.20.0" },
     { name = "advlog-core", extras = ["config", "torch", "distributed"], marker = "extra == 'all'" },
-    { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "omegaconf", marker = "extra == 'config'", specifier = ">=2.0.0" },
     { name = "pipreqs", marker = "extra == 'dev'", specifier = ">=0.5.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
