@@ -304,6 +304,12 @@ def _element_count(obj: Any) -> int | None:
     return size if isinstance(size, int) else None
 
 
+def _is_complex_array(obj: Any) -> bool:
+    """Check for a complex numpy array/scalar or torch tensor without importing either."""
+    dtype = getattr(obj, "dtype", None)
+    return getattr(dtype, "kind", None) == "c" or getattr(dtype, "is_complex", False) is True
+
+
 def _json_default(obj: Any, max_array_size: int | None = None) -> Any:
     """Convert values json cannot serialize natively.
 
@@ -318,6 +324,10 @@ def _json_default(obj: Any, max_array_size: int | None = None) -> Any:
     if isinstance(obj, (set, frozenset)):
         return list(obj)
 
+    # Also numpy.complex128, a subclass of complex
+    if isinstance(obj, complex):
+        return {"real": obj.real, "imag": obj.imag}
+
     # numpy scalars/arrays and torch tensors
     tolist = getattr(obj, "tolist", None)
     if callable(tolist):
@@ -331,6 +341,12 @@ def _json_default(obj: Any, max_array_size: int | None = None) -> Any:
                     "dtype": str(getattr(obj, "dtype", type(obj).__name__)),
                     "size": size,
                 }
+        if _is_complex_array(obj):
+            # Two arrays of the input's shape rather than one {"real", "imag"} per element
+            try:
+                return {"real": obj.real.tolist(), "imag": obj.imag.tolist()}
+            except Exception:
+                pass
         try:
             return tolist()
         except Exception:
@@ -348,7 +364,9 @@ class JSONFormatter(logging.Formatter):
     Infinity) are written as ``null`` to keep every line valid JSON. Arrays
     and tensors larger than ``max_array_size`` elements are written as
     ``{"_type": "array_summary", "shape": [...], "dtype": "...", "size": n}``
-    so one call cannot put megabytes into a single line.
+    so one call cannot put megabytes into a single line. Complex numbers are
+    written as ``{"real": ..., "imag": ...}``; for a complex array both
+    fields hold an array of the input's shape.
 
     Args:
         include_extras: Whether to include extra fields from the log record

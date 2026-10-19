@@ -231,7 +231,7 @@ Values JSON cannot represent (paths, sets, NumPy arrays, tensors, arbitrary obje
 "extra": {"field": {"_type": "array_summary", "shape": [1024, 1024], "dtype": "complex64", "size": 1048576}}
 ```
 
-Use `JSONFormatter(max_array_size=...)` on your own handler to change the limit (`None` writes every array in full). `file_format` is also accepted by `LoggerManager`, `LoggerConfig`, and `create_logger_group`; `create_file_handlers()` builds the handlers directly.
+Use `JSONFormatter(max_array_size=...)` on your own handler to change the limit (`None` writes every array in full). Complex numbers are written as `{"real": 1.0, "imag": 2.0}`; for a complex array, `real` and `imag` each hold an array of the original shape, so `np.array(v["real"]) + 1j * np.array(v["imag"])` restores it. `file_format` is also accepted by `LoggerManager`, `LoggerConfig`, and `create_logger_group`; `create_file_handlers()` builds the handlers directly.
 
 ```python
 import pandas as pd
