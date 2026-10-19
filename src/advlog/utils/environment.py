@@ -128,3 +128,27 @@ def _get_terminal_width() -> int:
         return size.columns
     except Exception:
         return 80
+
+
+def process_tag() -> str | None:
+    """Identify this process among others started together with the same script.
+
+    Slurm array tasks and the ranks of a distributed run (torchrun,
+    ``accelerate launch``, DeepSpeed) are often started within the same
+    second, so timestamped log file names alone collide.
+
+    Returns:
+        "task<N>" for a Slurm array task, "rank<N>" for a rank of a run with
+        more than one process, both joined by "_", or None when neither applies
+    """
+    parts = []
+
+    task = os.environ.get("SLURM_ARRAY_TASK_ID")
+    if task:
+        parts.append(f"task{task}")
+
+    rank = os.environ.get("RANK")
+    if rank and os.environ.get("WORLD_SIZE", "") != "1":
+        parts.append(f"rank{rank}")
+
+    return "_".join(parts) or None

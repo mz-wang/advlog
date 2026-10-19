@@ -130,7 +130,7 @@ db_logger.debug("Executing query: SELECT ...")
 | `name`, `log_level`, `propagate`, `console_output`, `show_location` | The logger itself |
 | `log_file`, `file_mode`, `file_format`, `max_file_size`, `backup_count`, `log_format`, `date_format`, `encoding` | The logger's own file (`log_file`). `file_format`, `max_file_size` and `backup_count` fall back to the manager's values when left as `None` |
 | `use_color`, `enable_rich_tracebacks` | The logger's own console handler, i.e. only with `LoggerManager(shared_console=False)` |
-| `use_accelerate` | Drops this logger's records on non-main processes of a distributed run (see [Distributed runs](#distributed-runs)). `initialize(main_process_only=True)` does the same for everything |
+| `use_accelerate` | Drops this logger's records on non-main processes of a distributed run (see [Distributed and parallel runs](#distributed-and-parallel-runs)). `initialize(main_process_only=True)` does the same for everything |
 
 ### Register a group of loggers at once
 
@@ -265,7 +265,7 @@ clear_context()           # remove all
 
 An explicit `extra=` on a call wins over a bound field of the same name. Bound fields are also available to custom text formats, e.g. `LoggerConfig(log_format="%(asctime)s %(run_id)s %(message)s")`. Names of built-in record attributes (`message`, `name`, `levelname`, ...) are rejected.
 
-### Distributed runs
+### Distributed and parallel runs
 
 With torchrun, `accelerate launch` or DeepSpeed every process runs your script. To have only rank 0 write to the console and log files:
 
@@ -274,6 +274,16 @@ initialize(session_name="train", main_process_only=True)
 ```
 
 The rank comes from accelerate once `Accelerator()` / `PartialState()` exists, and otherwise from the `RANK` environment variable (or `LOCAL_RANK` if only that is set), so records are filtered from the first line on. Other ranks create no log file.
+
+Processes started together would otherwise race for the same file: the auto-generated name has one-second resolution. So when `initialize()` picks the name itself, it appends the Slurm array task and the rank of a multi-process run:
+
+| Environment | Log file |
+|---|---|
+| plain run | `20260306_143022_train.log` |
+| Slurm array task (`SLURM_ARRAY_TASK_ID=3`) | `20260306_143022_train_task3.log` |
+| rank 1 of 4 (`RANK=1`, `WORLD_SIZE=4`) | `20260306_143022_train_rank1.log` |
+
+An explicit `log_file_path` is used exactly as given. For other parallel launches (e.g. a sweep script starting several processes), pass a distinct `suffix` or `log_file_path` per process.
 
 ### Smart log file naming
 

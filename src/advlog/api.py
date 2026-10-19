@@ -41,6 +41,7 @@ from typing import Any
 from advlog.core import LoggerManager
 from advlog.plugins import ProgressTracker
 from advlog.utils import LogNamingStrategy
+from advlog.utils.environment import process_tag
 from advlog.utils.path import StrPath
 
 # Global singleton instances
@@ -79,6 +80,8 @@ def initialize(
         use_date_dir: Whether to create a subdirectory with the current date (YYYY-MM-DD).
         session_name: Name prefix for log files. Ignored if log_file_path is provided.
         suffix: Optional suffix to append to the log filename. Ignored if log_file_path is provided.
+                In a Slurm array job or a distributed run, ``task<N>`` / ``rank<N>`` is
+                appended as well, so processes started in the same second get separate files.
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         use_color: Enable colored console output
         enable_file_logging: Enable file logging. Passing False on a later call
@@ -175,10 +178,14 @@ def initialize(
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
 
-            # Auto-generate filename with timestamp
-            # Pass directory and suffix to the naming strategy
+            # Auto-generate filename with timestamp. Processes started together
+            # (Slurm array tasks, ranks) get a tag so they do not share one file.
+            tag = process_tag()
             shared_file = LogNamingStrategy.timestamped(
-                name=session_name, suffix=suffix, directory=output_dir, use_date_dir=use_date_dir
+                name=session_name,
+                suffix="_".join(part for part in (suffix, tag) if part) or None,
+                directory=output_dir,
+                use_date_dir=use_date_dir,
             )
             # Ensure the date directory exists
             os.makedirs(os.path.dirname(shared_file), exist_ok=True)

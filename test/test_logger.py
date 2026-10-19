@@ -834,6 +834,39 @@ class TestGlobalAPI:
         assert "registered 3 samples" in next(tmp_path.rglob("*.log")).read_text()
         assert logging.getLogger("cap_api").handlers == []
 
+    @pytest.mark.parametrize(
+        ("env", "suffix", "ending"),
+        [
+            ({}, None, "_s.log"),
+            ({}, "dbg", "_s_dbg.log"),
+            ({"SLURM_ARRAY_TASK_ID": "3"}, None, "_s_task3.log"),
+            ({"RANK": "1", "WORLD_SIZE": "4"}, None, "_s_rank1.log"),
+            ({"RANK": "0", "WORLD_SIZE": "1"}, None, "_s.log"),  # single process: no tag
+            ({"SLURM_ARRAY_TASK_ID": "3", "RANK": "1"}, "dbg", "_s_dbg_task3_rank1.log"),
+        ],
+    )
+    def test_auto_named_file_tagged_per_process(self, tmp_path, monkeypatch, env, suffix, ending):
+        """Processes started together (array tasks, ranks) do not share a timestamped file."""
+        from advlog import initialize, reset
+
+        for variable in ("SLURM_ARRAY_TASK_ID", "RANK", "WORLD_SIZE"):
+            monkeypatch.delenv(variable, raising=False)
+        for variable, value in env.items():
+            monkeypatch.setenv(variable, value)
+
+        manager = initialize(output_dir=tmp_path, session_name="s", suffix=suffix)
+        assert manager.shared_file is not None
+        assert manager.shared_file.endswith(ending)
+        reset()
+
+    def test_explicit_log_file_path_not_tagged(self, tmp_path, monkeypatch):
+        from advlog import initialize, reset
+
+        monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "3")
+        manager = initialize(log_file_path=tmp_path / "run.log")
+        assert manager.shared_file == str(tmp_path / "run.log")
+        reset()
+
     @pytest.mark.parametrize(("rank", "writes"), [("0", True), ("1", False)])
     def test_initialize_main_process_only(self, tmp_path, monkeypatch, rank, writes):
         """Only rank 0 writes; other ranks leave no file behind (captured loggers included)."""
