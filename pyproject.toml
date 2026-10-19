@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "advlog-core"
-version = "0.3.0"
+version = "0.3.1"
 description = "Advanced logging library with Rich features, progress tracking, and ML training utilities"
 readme = "README.md"
 license = {text = "Apache-2.0"}

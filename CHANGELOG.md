@@ -1,3 +1,10 @@
+## v0.3.1 (2026-10-19)
+
+### Fix
+
+- **typing**: ship py.typed and accept path objects for file paths
+- **deps**: make omegaconf an optional dependency
+
 ## v0.3.0 (2026-10-14)
 
 ### BREAKING CHANGE
