@@ -17,7 +17,7 @@
 import os
 from datetime import datetime
 
-from .path import StrPath, ensure_dir
+from .path import StrPath
 
 
 class LogNamingStrategy:
@@ -182,7 +182,7 @@ class LogNamingStrategy:
             >>> LogNamingStrategy.incremental("app")
             'logs/app.log'  # or app_1.log if app.log exists
         """
-        ensure_dir(directory)
+        os.makedirs(directory, exist_ok=True)
 
         # Try base name first
         if suffix:
