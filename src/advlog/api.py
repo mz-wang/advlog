@@ -35,6 +35,7 @@ Usage:
 import logging
 import os
 import sys
+from collections.abc import Iterable
 from typing import Any
 
 from advlog.core import LoggerManager
@@ -64,6 +65,7 @@ def initialize(
     max_file_size: int | None = None,
     backup_count: int = 5,
     context: dict[str, Any] | None = None,
+    capture: str | Iterable[str] = (),
 ) -> LoggerManager:
     """
     Initialize the global logging system.
@@ -99,6 +101,12 @@ def initialize(
         context: Fields attached to every record, e.g. ``{"run_id": "exp-42"}``. They
                  behave like ``extra=`` passed on each call. None keeps the context
                  already bound; use bind_context() to change it later.
+        capture: Packages that log through the standard library
+                 (``logging.getLogger(__name__)``) whose records should go to the
+                 same console and files, e.g. ``["mylib", "otherlib"]``. Child loggers
+                 (``mylib.io``, ...) are included and records keep propagating, so the
+                 packages' own handlers and pytest's ``caplog`` are unaffected. "root"
+                 captures every library. A later call replaces the list.
 
     Returns:
         LoggerManager instance
@@ -132,6 +140,8 @@ def initialize(
         ...     backup_count=3,
         ...     context={"run_id": "exp-42"},
         ... )
+        >>> # Also collect the records of libraries that use logging.getLogger(__name__)
+        >>> manager = initialize(session_name="reconstruction", capture=["sim4pi"])
     """
     global _LOGGER_MANAGER, _INITIALIZED, _INIT_CONFIG
 
@@ -181,6 +191,7 @@ def initialize(
         max_file_size=max_file_size,
         backup_count=backup_count,
         context=context,
+        capture=capture,
     )
 
     # Store configuration for later reference
@@ -197,6 +208,7 @@ def initialize(
         "file_format": file_format,
         "max_file_size": max_file_size,
         "backup_count": backup_count,
+        "capture": capture,
     }
 
     _INITIALIZED = True

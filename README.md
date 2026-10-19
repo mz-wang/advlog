@@ -75,6 +75,32 @@ Things worth knowing:
 - `use_color=False` turns color off for everything drawn on the shared console, progress bars included.
 - `get_logger(name, log_level="ERROR")` sets the level even if that logger already exists.
 
+### Libraries: log through the standard library
+
+`get_logger()` is for application code: it gives the logger its own handlers and stops it from propagating, so the host program's handlers and pytest's `caplog` never see its records. A package meant to be imported by others should log the standard way and leave output to the application:
+
+```python
+# mylib/registry.py
+import logging
+
+log = logging.getLogger(__name__)
+log.info("registered %d samples", n)
+```
+
+The application then routes those records through advlog with `capture`:
+
+```python
+from advlog import initialize
+
+initialize(output_dir="./logs", session_name="sim", capture=["mylib"])
+```
+
+- Every logger under the captured name (`mylib.registry`, `mylib.io`, ...) goes to the advlog console and log file(s), with bound context fields attached.
+- Records keep propagating, so handlers the host installed on the root logger and pytest's `caplog` still receive them. If the host also logs to the console from the root logger, those lines appear twice; capture the package or configure the root handler, not both.
+- The captured logger's level is lowered to the lowest level the advlog handlers accept (`DEBUG` with file logging) and restored by `reset()` or by a later `initialize()` that no longer lists it.
+- `capture=["root"]` collects every library, including third-party `DEBUG` chatter in the log file; prefer naming packages.
+- `LoggerManager` offers the same through `LoggerManager(capture=...)`, `capture(name)` and `release(name)`.
+
 ### Per-logger configuration with `LoggerConfig`
 
 ```python

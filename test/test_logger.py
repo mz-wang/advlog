@@ -432,6 +432,100 @@ class TestContext:
         assert log.filters == []
 
 
+class _Collect(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+
+class TestCapture:
+    """Standard library loggers (as used by libraries) captured by package name."""
+
+    def test_child_records_reach_shared_file_and_still_propagate(self, tmp_path):
+        shared = tmp_path / "shared.log"
+        collector = _Collect()
+        root = logging.getLogger()
+        root.addHandler(collector)
+        try:
+            LoggerManager(shared_console=False, shared_file=shared, file_mode="w", capture="cap_a")
+            logging.getLogger("cap_a.sub").info("from library")
+        finally:
+            root.removeHandler(collector)
+        LoggerManager.reset()
+
+        assert "from library" in shared.read_text()
+        assert [r.getMessage() for r in collector.records] == ["from library"]
+
+    def test_context_reaches_captured_records(self, tmp_path):
+        """Context is attached by the handlers, since logger filters skip propagated records."""
+        LoggerManager(
+            shared_console=False,
+            shared_file=tmp_path / "run.jsonl",
+            file_format="json",
+            context={"run_id": "r1"},
+            capture=["cap_b"],
+        )
+        logging.getLogger("cap_b.io").info("loaded", extra={"step": 1})
+        LoggerManager.reset()
+
+        assert _read_jsonl(tmp_path / "run.jsonl")[0]["extra"] == {"run_id": "r1", "step": 1}
+
+    def test_level_lowered_then_restored(self, tmp_path):
+        lib = logging.getLogger("cap_c")
+        lib.setLevel(logging.WARNING)
+        LoggerManager(shared_console=True, console_log_level=logging.INFO, capture="cap_c")
+        assert lib.level == logging.INFO  # lowest level a shared handler accepts (console only)
+
+        LoggerManager(shared_console=True, shared_file=tmp_path / "a.log", capture="cap_c")
+        assert lib.level == logging.DEBUG  # file handlers accept DEBUG
+
+        LoggerManager.reset()
+        assert lib.level == logging.WARNING
+        assert lib.handlers == []
+
+    def test_reinitialize_replaces_captured_set(self, tmp_path):
+        first = LoggerManager(shared_console=False, shared_file=tmp_path / "1.log", capture=["cap_d", "cap_e"])
+        old_handlers = list(first._shared_file_handlers)
+        manager = LoggerManager(shared_console=False, shared_file=tmp_path / "2.log", capture="cap_e")
+
+        assert manager.get_captured() == ["cap_e"]
+        assert logging.getLogger("cap_d").handlers == []
+        assert logging.getLogger("cap_e").handlers == manager._shared_file_handlers
+        assert not set(old_handlers) & set(logging.getLogger("cap_e").handlers)
+
+    def test_managed_logger_inside_captured_package_logged_once(self, tmp_path):
+        shared = tmp_path / "shared.log"
+        manager = LoggerManager(shared_console=False, shared_file=shared, file_mode="w", capture="cap_f")
+        manager.register_logger("cap_f.app", file_strategy="merged").info("only once")
+        LoggerManager.reset()
+
+        assert shared.read_text().count("only once") == 1
+
+    def test_root_aliases(self):
+        root = logging.getLogger()
+        level = root.level
+        manager = LoggerManager(shared_console=True, capture="")
+        assert manager.get_captured() == ["root"]
+        assert manager._console_handler in root.handlers
+
+        manager.release("root")
+        assert manager.get_captured() == []
+        assert manager._console_handler not in root.handlers
+        assert root.level == level
+
+    def test_capture_and_release_methods(self, tmp_path):
+        manager = LoggerManager(shared_console=False, shared_file=tmp_path / "x.log")
+        lib = manager.capture("cap_g")
+        assert lib.handlers == manager._shared_file_handlers
+        manager.release("cap_g")
+        manager.release("never_captured")  # ignored
+        assert lib.handlers == []
+        assert lib.level == logging.NOTSET
+
+
 class TestReinitialize:
     """Test that re-initializing applies the new settings in full."""
 
@@ -690,6 +784,19 @@ class TestGlobalAPI:
             get_logger("path_fixed").info("fixed path")
             reset()
             assert "fixed path" in target.read_text()
+
+    def test_initialize_capture_library_logger(self, tmp_path, caplog):
+        """A library logging through logging.getLogger() reaches the log file and caplog."""
+        from advlog import initialize, reset
+
+        initialize(output_dir=tmp_path, session_name="cap", file_mode="w", capture=["cap_api"])
+        with caplog.at_level(logging.INFO):
+            logging.getLogger("cap_api.registry").info("registered 3 samples")
+        reset()
+
+        assert "registered 3 samples" in caplog.text
+        assert "registered 3 samples" in next(tmp_path.rglob("*.log")).read_text()
+        assert logging.getLogger("cap_api").handlers == []
 
     def test_initialize_with_both_formats(self):
         """initialize(file_format='both') adds a .jsonl file next to the text log."""
