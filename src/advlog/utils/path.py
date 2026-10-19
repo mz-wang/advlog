@@ -16,8 +16,11 @@
 
 import os
 
+# A filesystem path as a string or a path object such as pathlib.Path
+StrPath = str | os.PathLike[str]
 
-def ensure_dir(path: str) -> None:
+
+def ensure_dir(path: StrPath) -> None:
     """Ensure the directory exists for the given file path.
 
     Args:

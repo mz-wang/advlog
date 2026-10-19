@@ -18,7 +18,7 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler as StdRotatingFileHandler
 
-from advlog.utils.path import ensure_dir
+from advlog.utils.path import StrPath, ensure_dir
 
 FILE_FORMATS = ("text", "json", "both")
 DEFAULT_LOG_FORMAT = "%(asctime)s |%(levelname)-8s| %(message)s"
@@ -97,7 +97,7 @@ class FileHandler:
 
     @staticmethod
     def create(
-        log_file: str,
+        log_file: StrPath,
         mode: str = "w",
         encoding: str = "utf-8",
         log_level: int = logging.DEBUG,
@@ -166,7 +166,7 @@ class RotatingFileHandler:
 
     @staticmethod
     def create(
-        log_file: str,
+        log_file: StrPath,
         max_bytes: int = 10 * 1024 * 1024,  # 10 MB
         backup_count: int = 5,
         encoding: str = "utf-8",
@@ -231,7 +231,7 @@ class RotatingFileHandler:
 
 
 def create_file_handler(
-    log_file: str, mode: str = "w", max_file_size: int | None = None, backup_count: int = 5, **kwargs
+    log_file: StrPath, mode: str = "w", max_file_size: int | None = None, backup_count: int = 5, **kwargs
 ) -> logging.Handler:
     """Convenience function to create a file handler.
 
@@ -292,7 +292,7 @@ def _resolve_log_paths(log_file: str, file_format: str) -> tuple[str | None, str
 
 
 def create_file_handlers(
-    log_file: str,
+    log_file: StrPath,
     file_format: str = "text",
     mode: str = "w",
     max_file_size: int | None = None,
@@ -317,7 +317,7 @@ def create_file_handlers(
         # logs/app.log (text) and logs/app.jsonl (one JSON object per line)
         handlers = create_file_handlers("logs/app.log", file_format="both")
     """
-    text_file, json_file = _resolve_log_paths(log_file, file_format)
+    text_file, json_file = _resolve_log_paths(os.fspath(log_file), file_format)
 
     handlers = []
     if text_file:

@@ -139,6 +139,20 @@ class TestLoggerManager:
             assert "from m2" in content
             LoggerManager.reset()
 
+    def test_path_objects_accepted(self):
+        """shared_file and LoggerConfig.log_file accept pathlib.Path."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            shared = Path(tmpdir) / "shared.log"
+            own = Path(tmpdir) / "own.log"
+            manager = LoggerManager(shared_console=False, shared_file=shared, file_mode="w")
+            assert manager.shared_file == str(shared)
+            manager.register_logger("merged_path", file_strategy="merged").info("to shared")
+            manager.register_logger(config=LoggerConfig(name="own_path", log_file=own)).info("to own")
+            LoggerManager.reset()
+
+            assert "to shared" in shared.read_text()
+            assert "to own" in own.read_text()
+
 
 def _read_jsonl(path):
     return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()]
@@ -254,6 +268,17 @@ class TestCreateFileHandlers:
             base = Path(tmpdir) / "run.jsonl"
             handlers = create_file_handlers(str(base), file_format="both")
             names = sorted(Path(h.baseFilename).name for h in handlers)
+            assert names == ["run.jsonl", "run.log"]
+            for h in handlers:
+                h.close()
+
+    def test_accepts_path_objects(self):
+        """Paths may be given as pathlib.Path as well as str."""
+        from advlog import create_file_handlers
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            handlers = create_file_handlers(Path(tmpdir) / "sub" / "run.log", file_format="both")
+            names = sorted(Path(h.baseFilename).name for h in handlers if isinstance(h, logging.FileHandler))
             assert names == ["run.jsonl", "run.log"]
             for h in handlers:
                 h.close()
@@ -650,6 +675,22 @@ class TestGlobalAPI:
             # Close all handlers before tmpdir cleanup
             reset()
 
+    def test_initialize_accepts_path_objects(self):
+        """output_dir and log_file_path accept pathlib.Path."""
+        from advlog import get_logger, initialize, reset
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            initialize(output_dir=Path(tmpdir) / "auto", session_name="p", file_mode="w")
+            get_logger("path_auto").info("auto named")
+            reset()
+            assert "auto named" in next((Path(tmpdir) / "auto").rglob("*.log")).read_text()
+
+            target = Path(tmpdir) / "fixed" / "run.log"
+            initialize(log_file_path=target, file_mode="w")
+            get_logger("path_fixed").info("fixed path")
+            reset()
+            assert "fixed path" in target.read_text()
+
     def test_initialize_with_both_formats(self):
         """initialize(file_format='both') adds a .jsonl file next to the text log."""
         from advlog import get_logger, initialize, reset
@@ -796,3 +837,11 @@ class TestGlobalAPI:
         # After reset, get_logger should re-initialize cleanly
         log = get_logger("after_reset")
         assert isinstance(log, logging.Logger)
+
+
+class TestPackaging:
+    def test_ships_py_typed_marker(self):
+        """The package is marked as typed (PEP 561) so type checkers use its annotations."""
+        import advlog
+
+        assert (Path(advlog.__file__).parent / "py.typed").is_file()

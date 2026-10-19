@@ -15,6 +15,7 @@
 """Logger manager for coordinating multiple loggers with shared console output."""
 
 import logging
+import os
 import threading
 from typing import Any
 
@@ -23,6 +24,7 @@ from advlog.core.filters import ContextFilter, MainProcessFilter
 from advlog.handlers.console import create_console_handler
 from advlog.handlers.file import FILE_FORMATS, create_file_handlers
 from advlog.utils.console import get_shared_console
+from advlog.utils.path import StrPath
 from advlog.utils.rich_compat import RICH_AVAILABLE, Console
 
 
@@ -73,7 +75,7 @@ class LoggerManager:
     def __init__(
         self,
         shared_console: bool = True,
-        shared_file: str | None = None,
+        shared_file: StrPath | None = None,
         console_log_level: int = logging.INFO,
         file_log_level: int = logging.DEBUG,
         use_color: bool = True,
@@ -133,7 +135,7 @@ class LoggerManager:
         old_files = list(self._shared_file_handlers)
 
         self.shared_console = shared_console
-        self.shared_file = shared_file
+        self.shared_file = os.fspath(shared_file) if shared_file is not None else None
         self.console_log_level = console_log_level
         self.file_log_level = file_log_level
         self.use_color = use_color
@@ -261,7 +263,7 @@ class LoggerManager:
         name: str = "",
         log_level: int = logging.DEBUG,
         file_strategy: str = "separate",
-        log_file: str | None = None,
+        log_file: StrPath | None = None,
         use_console: bool = True,
         config: LoggerConfig | None = None,
     ) -> logging.Logger:
@@ -488,9 +490,9 @@ class LoggerManager:
 def create_logger_group(
     module_names: list[str],
     shared_console: bool = True,
-    shared_file: str | None = None,
+    shared_file: StrPath | None = None,
     file_strategy: str = "separate",
-    log_dir: str = "logs",
+    log_dir: StrPath = "logs",
     use_color: bool = True,
     file_format: str = "text",
 ) -> dict[str, logging.Logger]:

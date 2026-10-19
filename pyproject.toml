@@ -25,7 +25,6 @@ classifiers = [
 
 # Core dependencies
 dependencies = [
-    "omegaconf>=2.3.0",
     "rich>=10.0.0",
 ]
 
@@ -121,11 +120,11 @@ name = "cz_conventional_commits"
 tag_format = "v$version"
 annotated_tag = true
 version_scheme = "pep440"
-version = "0.3.0"
+# Reads/writes [project].version and keeps the advlog-core entry in uv.lock in step
+version_provider = "uv"
 update_changelog_on_bump = true
 major_version_zero = true
 version_files = [
-    "pyproject.toml:^version",
     "src/advlog/__init__.py:^__version__",
     "README.md:badge/version-"
 ]
