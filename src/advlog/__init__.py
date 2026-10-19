@@ -89,6 +89,9 @@ try:
         ProgressTracker,
         TrainingLogger,
         create_progress_bar,
+        log_artifact,
+        log_metrics,
+        log_run_info,
     )
 
     PLUGINS_AVAILABLE = True
@@ -109,6 +112,7 @@ from .api import (
 )
 from .utils import (
     LogNamingStrategy,
+    collect_run_info,
     detect_environment,
     get_timestamped_name,
     supports_color,
@@ -134,7 +138,11 @@ __all__ = [
     "ProgressTracker",
     "create_progress_bar",
     "TrainingLogger",
+    "log_run_info",
+    "log_metrics",
+    "log_artifact",
     # Utils
+    "collect_run_info",
     "detect_environment",
     "supports_color",
     "LogNamingStrategy",

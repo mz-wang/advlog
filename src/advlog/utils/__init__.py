@@ -14,10 +14,11 @@
 
 """Utility modules for the logging system."""
 
-from .environment import detect_environment, supports_color
+from .environment import collect_run_info, detect_environment, supports_color
 from .naming import LogNamingStrategy, get_timestamped_name
 
 __all__ = [
+    "collect_run_info",
     "detect_environment",
     "supports_color",
     "LogNamingStrategy",
