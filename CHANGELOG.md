@@ -1,3 +1,18 @@
+## v0.6.0 (2026-10-19)
+
+### BREAKING CHANGE
+
+- complex numbers in JSON output are objects with "real"
+and "imag" fields instead of strings like "(1+2j)".
+
+### Feat
+
+- **json**: write complex numbers as real and imag fields
+
+### Fix
+
+- **core**: leave the level of registered loggers to their registration
+
 ## v0.5.0 (2026-10-19)
 
 ### Feat

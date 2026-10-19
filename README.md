@@ -2,7 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.5.0-brightgreen)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.0-brightgreen)](CHANGELOG.md)
 
 A Python logging library with colored terminal output, file management, progress tracking, and ML training utilities, built on top of [Rich](https://github.com/Textualize/rich).
 
