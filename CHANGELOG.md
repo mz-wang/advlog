@@ -1,3 +1,23 @@
+## v0.4.0 (2026-10-19)
+
+### BREAKING CHANGE
+
+- arrays and tensors with more than 1000 elements are no
+longer written in full to JSON output; their shape, dtype and size are
+written instead. Pass JSONFormatter(max_array_size=None) to keep the
+full values.
+
+### Feat
+
+- **api**: give each process its own auto-named log file
+- **core**: gate output to rank 0 via initialize(main_process_only=True)
+- **core**: capture standard library loggers by package name
+- **json**: summarize large arrays instead of writing them in full
+
+### Fix
+
+- **naming**: create the target directory in LogNamingStrategy.incremental
+
 ## v0.3.1 (2026-10-19)
 
 ### Fix
