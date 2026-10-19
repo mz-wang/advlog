@@ -203,6 +203,46 @@ class TestJSONFormatter:
         data = json.loads(JSONFormatter().format(record))
         assert data["extra"] == {"values": [1, 2, 3]}
 
+    def test_complex_numbers_written_as_real_and_imag(self):
+        class Part:
+            def __init__(self, values):
+                self.values = values
+
+            def tolist(self):
+                return self.values
+
+        class ComplexArray:  # numpy-like: dtype.kind == "c", .real / .imag arrays
+            size, shape = 2, (2,)
+            dtype = type("dtype", (), {"kind": "c"})()
+            real, imag = Part([1.0, 0.0]), Part([2.0, float("nan")])
+
+            def tolist(self):
+                raise AssertionError("complex array converted element by element")
+
+        class ComplexTensor:  # torch-like: dtype.is_complex
+            size, shape = 1, (1, 1)
+            dtype = type("dtype", (), {"is_complex": True})()
+            real, imag = Part([[3.0]]), Part([[-1.0]])
+
+            def numel(self):
+                return 1
+
+            def tolist(self):
+                raise AssertionError("complex tensor converted element by element")
+
+        record = _record()
+        record.z = 1 + 2j
+        record.zs = [0.5j]
+        record.array = ComplexArray()
+        record.tensor = ComplexTensor()
+        data = json.loads(JSONFormatter().format(record))
+        assert data["extra"] == {
+            "z": {"real": 1.0, "imag": 2.0},
+            "zs": [{"real": 0.0, "imag": 0.5}],
+            "array": {"real": [1.0, 0.0], "imag": [2.0, None]},  # NaN -> null as elsewhere
+            "tensor": {"real": [[3.0]], "imag": [[-1.0]]},
+        }
+
     def test_large_arrays_written_as_summary(self):
         class NumpyLike:
             def __init__(self, n):
