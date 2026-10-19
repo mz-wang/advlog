@@ -1,3 +1,10 @@
+## v0.5.0 (2026-10-19)
+
+### Feat
+
+- **run**: add run info, metrics and artifact records
+- **api**: log exceptions in threads and, opt-in, SIGTERM
+
 ## v0.4.0 (2026-10-19)
 
 ### BREAKING CHANGE
