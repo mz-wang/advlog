@@ -98,7 +98,7 @@ initialize(output_dir="./logs", session_name="sim", capture=["mylib"])
 
 - Every logger under the captured name (`mylib.registry`, `mylib.io`, ...) goes to the advlog console and log file(s), with bound context fields attached.
 - Records keep propagating, so handlers the host installed on the root logger and pytest's `caplog` still receive them. If the host also has a console handler on the root logger (e.g. from `logging.basicConfig()`), those lines appear twice, and that handler now also gets the package's `INFO`/`DEBUG` records, because propagation checks handler levels, not the root logger's level. Capture the package or configure a root console handler, not both.
-- The captured logger's level is lowered to the lowest level the advlog handlers accept (`DEBUG` with file logging) and restored by `reset()` or by a later `initialize()` that no longer lists it.
+- The captured logger's level is lowered to the lowest level the advlog handlers accept (`DEBUG` with file logging) and restored by `reset()` or by a later `initialize()` that no longer lists it. A logger obtained with `get_logger()` under exactly the captured name keeps the level and handlers `get_logger()` gave it.
 - `capture=["root"]` collects every library, including third-party `DEBUG` chatter in the log file; prefer naming packages.
 - `LoggerManager` offers the same through `LoggerManager(capture=...)`, `capture(name)` and `release(name)`.
 

@@ -900,6 +900,31 @@ class TestGlobalAPI:
             assert "from app" in log_file.read_text()
             assert "from lib" in log_file.read_text()
 
+    def test_capture_then_register_same_name_keeps_level(self):
+        """Releasing a captured name that was registered meanwhile leaves its level alone."""
+        from advlog import get_logger, initialize
+
+        initialize(enable_file_logging=False, capture=["n1_a"])
+        log = get_logger("n1_a")
+        assert log.level == logging.DEBUG
+
+        initialize(enable_file_logging=False)  # no longer captured
+        assert log.level == logging.DEBUG  # was restored to NOTSET -> effective WARNING
+        assert log.handlers  # registration's console handler re-attached
+
+    def test_capture_does_not_override_registered_level(self):
+        """An explicit get_logger(log_level=...) survives capturing the same name."""
+        from advlog import get_logger, initialize
+
+        log = get_logger("n1_b", log_level="WARNING")
+        manager = initialize(enable_file_logging=False, capture=["n1_b"])
+        assert log.level == logging.WARNING
+        assert manager.get_captured() == ["n1_b"]
+
+        manager.release("n1_b")
+        assert log.level == logging.WARNING
+        assert manager._console_handler in log.handlers  # release keeps the registration's handlers
+
     def test_initialize_with_both_formats(self):
         """initialize(file_format='both') adds a .jsonl file next to the text log."""
         from advlog import get_logger, initialize, reset
