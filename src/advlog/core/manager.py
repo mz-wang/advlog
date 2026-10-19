@@ -281,7 +281,9 @@ class LoggerManager:
         keeps its handlers and keeps propagating, so the host's own handlers
         (and pytest's ``caplog``) still receive the records. Its level is
         lowered to the lowest level the shared handlers accept, and restored
-        by release().
+        by release(). A logger registered with register_logger() (or
+        get_logger()) keeps the level and handlers of its registration;
+        capture() and release() do not change it.
 
         Args:
             name: Logger name, usually a top-level package ("mylib").
@@ -312,8 +314,18 @@ class LoggerManager:
         return list(self._captured)
 
     def _capture(self, name: str, stale: Iterable[logging.Handler | None] = ()) -> logging.Logger:
-        """Attach the current shared handlers to a logger, replacing stale ones."""
+        """Attach the current shared handlers to a logger, replacing stale ones.
+
+        A logger registered with register_logger() is left alone: its
+        registration owns its level and handlers (refreshed on re-initialize),
+        so capturing it only records the name.
+        """
         logger = logging.getLogger(name)
+        if logger.name not in self._captured:
+            self._captured[logger.name] = logger.level
+        if logger.name in self.loggers:
+            return logger
+
         for handler in stale:
             if handler is not None and handler in logger.handlers:
                 logger.removeHandler(handler)
@@ -323,8 +335,6 @@ class LoggerManager:
             if handler not in logger.handlers:
                 logger.addHandler(handler)
 
-        if logger.name not in self._captured:
-            self._captured[logger.name] = logger.level
         if shared:
             logger.setLevel(min(h.level for h in shared))
         return logger
@@ -333,11 +343,15 @@ class LoggerManager:
         """Detach shared (current and stale) handlers from a captured logger."""
         if name not in self._captured:
             return
+        level = self._captured.pop(name)
+        if name in self.loggers:
+            return  # registered meanwhile: its registration owns level and handlers
+
         logger = logging.getLogger(name)
         for handler in (self._console_handler, *self._shared_file_handlers, *stale):
             if handler is not None and handler in logger.handlers:
                 logger.removeHandler(handler)
-        logger.setLevel(self._captured.pop(name))
+        logger.setLevel(level)
 
     def bind_context(self, **fields: Any) -> None:
         """Attach fields to every record of every managed logger.
