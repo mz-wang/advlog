@@ -17,6 +17,7 @@ A Python logging library with colored terminal output, file management, progress
 - **Progress Tracking** — Integrated progress bars via `ProgressTracker`
 - **Multi-Module Coordination** — `LoggerManager` for consistent logging across modules
 - **ML/Training Utilities** — `TrainingLogger` plugin for experiment logging
+- **Run Records** — Git commit, host and command line of each run, per-step metrics and output files as queryable records
 - **Smart File Naming** — Timestamped, daily, and incremental log file naming
 
 ## Installation
@@ -339,16 +340,47 @@ trainer.log_train_step(
 
 Records logged through `TrainingLogger` report the file and line of *your* call (visible with `show_location=True` and in the JSON `module` / `function` / `line` fields), not a location inside the helper.
 
+## Run Records
+
+For simulations and experiments in general, three functions each write one record, tagged with `extra.event` like the `TrainingLogger` records:
+
+```python
+from advlog import initialize, log_artifact, log_metrics, log_run_info
+
+initialize(session_name="sim", file_format="both")
+
+info = log_run_info(packages=["numpy", "scipy"])          # once, at the start
+for it in range(n_iter):
+    ...
+    log_metrics({"residual": res, "energy": e}, step=it)  # extra fields: log_metrics(..., phase="relax")
+log_artifact("field", "out/field.npy")                    # each output file
+```
+
+| Function | `extra.event` | Stored under `extra` | Text log |
+|---|---|---|---|
+| `log_run_info()` | `"run_start"` | `run_info`: `argv`, `cwd`, `git` (`commit`, `branch`, `dirty`), `hostname`, `pid`, `python`, `executable`, `platform`, plus `packages`, `slurm` and `rank` / `world_size` when present | `Run started: train.py --lr 0.1`, then git, host and package lines |
+| `log_metrics(metrics, step=None)` | `"metrics"` | `step`, `metrics`, your keyword fields | `step 120: residual=3.2e-07, energy=-1.25` |
+| `log_artifact(name, path)` | `"artifact"` | `artifact` (the name), absolute `path`, `exists`, `size` | `Artifact field: /abs/out/field.npy (8.0 MB)`; a missing path is a `WARNING` |
+
+- `git` describes the repository containing the running script (or `repo_dir=`). `dirty` is true when tracked files have uncommitted changes, which is the case where the commit alone does not reproduce the run. Untracked files are ignored, since results written into the repository would otherwise mark every run dirty. `git` is `null` outside a repository or without git.
+- All three log through the managed `advlog` logger unless you pass `logger=`. `collect_run_info()` returns the run info without logging it, e.g. to `bind_context(git_sha=info["git"]["commit"])`.
+- For parameters, `TrainingLogger(log).log_configuration(params)` writes one `"config"` record; it is not specific to training.
+
 ## Exception Logging
 
 ```python
 from advlog import setup_exception_logging
 
-# Install a sys.excepthook that logs all uncaught exceptions
+# Log uncaught exceptions, in the main thread and in other threads
 setup_exception_logging()
+
+# In a Slurm job (or anything stopped with kill / docker stop): also log SIGTERM
+setup_exception_logging(sigterm=True)
 ```
 
-The traceback goes wherever your other logs go: the console and the log file(s) configured by `initialize()`, including the `.jsonl` file (as an `ERROR` record with an `exception` field). Pass your own logger to route it elsewhere. `KeyboardInterrupt` is left to Python's default handling.
+The traceback goes wherever your other logs go: the console and the log file(s) configured by `initialize()`, including the `.jsonl` file (as an `ERROR` record with an `exception` field). Pass your own logger to route it elsewhere. `KeyboardInterrupt` is left to Python's default handling, as is `SystemExit` in a thread; `threads=False` leaves `threading.excepthook` alone.
+
+SIGTERM is what Slurm sends at the time limit and on `scancel`. By default Python dies on it at once: no `finally` blocks, no context managers, no atexit handlers, and nothing in the log. With `sigterm=True` an `ERROR` record (`extra.event` = `"terminated"`) is written and `SystemExit(143)` is raised, so cleanup code runs and the exit status is the usual one for SIGTERM. A SIGTERM handler you installed earlier is called instead of exiting. Call it from the main thread. Slurm sends SIGKILL after a grace period (`KillWait`, 30 s by default), so keep the cleanup short.
 
 ## Real-World Example
 
@@ -357,6 +389,7 @@ See [`examples/real_world_demo/`](examples/real_world_demo/) for a complete mult
 ```bash
 python -m examples.real_world_demo.main
 python -m examples.real_world_demo.structured_demo   # JSON Lines output and querying it
+python -m examples.real_world_demo.run_records_demo  # run info, metrics and artifacts of a solver run
 ```
 
 ## Dependencies

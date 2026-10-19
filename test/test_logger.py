@@ -17,6 +17,7 @@
 import json
 import logging
 import logging.handlers
+import sys
 import tempfile
 from pathlib import Path
 
@@ -767,9 +768,23 @@ class TestCreateLoggerGroup:
 class TestGlobalAPI:
     """Test the initialize/get_logger/get_progress/reset API."""
 
+    def setup_method(self):
+        import signal
+        import sys
+        import threading
+
+        # setup_exception_logging() replaces process-wide hooks
+        self._hooks = (sys.excepthook, threading.excepthook, signal.getsignal(signal.SIGTERM))
+
     def teardown_method(self):
+        import signal
+        import sys
+        import threading
+
         from advlog import reset
 
+        sys.excepthook, threading.excepthook, sigterm = self._hooks
+        signal.signal(signal.SIGTERM, sigterm)
         reset()
 
     def test_get_logger_auto_initializes(self):
@@ -1021,6 +1036,104 @@ class TestGlobalAPI:
         assert sys.excepthook is not original
         # Restore
         sys.excepthook = original
+
+    def test_thread_exception_reaches_log_file(self, tmp_path):
+        import threading
+
+        from advlog import initialize, reset, setup_exception_logging
+
+        def fail():
+            raise ValueError("bad sample")
+
+        def stop():
+            raise SystemExit
+
+        initialize(log_file_path=tmp_path / "run.log", file_mode="w")
+        setup_exception_logging()
+        for target, name in ((fail, "loader"), (stop, "quiet")):
+            thread = threading.Thread(target=target, name=name)
+            thread.start()
+            thread.join()
+        reset()
+
+        content = (tmp_path / "run.log").read_text()
+        assert "Uncaught ValueError in thread loader" in content
+        assert "ValueError: bad sample" in content
+        assert "quiet" not in content  # SystemExit ends a thread silently
+
+    def test_threads_false_keeps_thread_hook(self):
+        import threading
+
+        from advlog import setup_exception_logging
+
+        original = threading.excepthook
+        setup_exception_logging(threads=False)
+        assert threading.excepthook is original
+
+    def test_sigterm_logged_then_exits(self, tmp_path):
+        import signal
+
+        from advlog import initialize, reset, setup_exception_logging
+
+        before = signal.getsignal(signal.SIGTERM)
+        initialize(log_file_path=tmp_path / "run.log", file_format="json")
+        setup_exception_logging()
+        assert signal.getsignal(signal.SIGTERM) is before  # opt-in only
+
+        setup_exception_logging(sigterm=True)
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        with pytest.raises(SystemExit) as exit_info:
+            handler(signal.SIGTERM, None)
+        reset()
+
+        assert exit_info.value.code == 143
+        record = _read_jsonl(tmp_path / "run.jsonl")[0]
+        assert record["level"] == "ERROR"
+        assert record["extra"] == {"event": "terminated", "signal": "SIGTERM"}
+
+    def test_sigterm_defers_to_earlier_handler(self):
+        import signal
+
+        from advlog import setup_exception_logging
+
+        calls = []
+        signal.signal(signal.SIGTERM, lambda signum, frame: calls.append(signum))
+        setup_exception_logging(sigterm=True)
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        handler(signal.SIGTERM, None)  # no SystemExit: the earlier handler decides
+        assert calls == [signal.SIGTERM]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM cannot be delivered to a Python handler on Windows")
+    def test_real_sigterm_runs_cleanup(self, tmp_path):
+        """A real SIGTERM is logged, finally blocks run, and the exit status is 143."""
+        import signal
+        import subprocess
+        import textwrap
+
+        script = tmp_path / "job.py"
+        script.write_text(
+            textwrap.dedent(f"""
+                import sys, time
+                sys.path.insert(0, {str(Path(__file__).parent.parent / "src")!r})
+                from advlog import initialize, setup_exception_logging
+                initialize(log_file_path={str(tmp_path / "job.log")!r}, file_mode="w")
+                setup_exception_logging(sigterm=True)
+                try:
+                    print("ready", flush=True)
+                    time.sleep(30)
+                finally:
+                    open({str(tmp_path / "cleanup")!r}, "w").close()
+            """)
+        )
+        process = subprocess.Popen([sys.executable, str(script)], stdout=subprocess.PIPE, text=True)
+        assert process.stdout is not None
+        assert process.stdout.readline().strip() == "ready"
+        process.send_signal(signal.SIGTERM)
+        assert process.wait(timeout=10) == 143
+        assert (tmp_path / "cleanup").exists()
+        assert "Received SIGTERM" in (tmp_path / "job.log").read_text()
 
     def test_reset_clears_state(self):
         """reset() allows re-initialization."""

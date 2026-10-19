@@ -15,8 +15,14 @@
 """Environment detection utilities."""
 
 import os
+import platform
+import subprocess
 import sys
+from collections.abc import Iterable
+from importlib import metadata
 from typing import Any
+
+from .path import StrPath
 
 
 def detect_environment() -> dict[str, Any]:
@@ -152,3 +158,110 @@ def process_tag() -> str | None:
         parts.append(f"rank{rank}")
 
     return "_".join(parts) or None
+
+
+_SLURM_FIELDS = {
+    "job_id": "SLURM_JOB_ID",
+    "job_name": "SLURM_JOB_NAME",
+    "array_job_id": "SLURM_ARRAY_JOB_ID",
+    "array_task_id": "SLURM_ARRAY_TASK_ID",
+    "nodelist": "SLURM_JOB_NODELIST",
+}
+
+
+def _main_script_dir() -> str:
+    """Directory of the running script, or the working directory if there is none."""
+    path = getattr(sys.modules.get("__main__"), "__file__", None)
+    return os.path.dirname(os.path.abspath(path)) if path else os.getcwd()
+
+
+def _git_state(directory: StrPath) -> dict[str, Any] | None:
+    """Read commit, branch and uncommitted changes of the repository containing a directory.
+
+    Args:
+        directory: Any directory inside the repository
+
+    Returns:
+        {"commit", "branch", "dirty"}, or None if git is missing or this is no repository
+    """
+    try:
+        # One call gives commit, branch and changes. Untracked files are left
+        # out: results and logs written into the repository would mark every run dirty.
+        output = subprocess.run(
+            ["git", "status", "--porcelain=v2", "--branch", "--untracked-files=no"],
+            cwd=directory,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    state: dict[str, Any] = {"commit": None, "branch": None, "dirty": False}
+    for line in output.splitlines():
+        if line.startswith("# branch.oid "):
+            oid = line.removeprefix("# branch.oid ")
+            state["commit"] = None if oid == "(initial)" else oid
+        elif line.startswith("# branch.head "):
+            head = line.removeprefix("# branch.head ")
+            state["branch"] = None if head == "(detached)" else head
+        elif line and not line.startswith("#"):
+            state["dirty"] = True
+    return state
+
+
+def collect_run_info(repo_dir: StrPath | None = None, packages: Iterable[str] = ()) -> dict[str, Any]:
+    """Collect what is needed to tell a run apart and reproduce it.
+
+    Args:
+        repo_dir: Directory inside the git repository to describe. Defaults to
+                  the directory of the running script (the working directory
+                  when there is no script, e.g. in Jupyter).
+        packages: Distribution names whose installed versions to record, e.g.
+                  ``["numpy", "torch"]``. A package that is not installed is
+                  recorded as None.
+
+    Returns:
+        Dict with ``argv``, ``cwd``, ``python``, ``executable``, ``platform``,
+        ``hostname``, ``pid`` and ``git`` (``{"commit", "branch", "dirty"}``,
+        None outside a repository or without git; ``dirty`` ignores untracked
+        files). ``packages``, ``slurm`` (job and array ids) and ``rank`` /
+        ``world_size`` are added when there is something to record.
+
+    Example:
+        >>> info = collect_run_info(packages=["numpy"])
+        >>> info["git"]
+        {'commit': '1a2b3c...', 'branch': 'main', 'dirty': True}
+    """
+    info: dict[str, Any] = {
+        "argv": list(sys.argv),
+        "cwd": os.getcwd(),
+        "python": platform.python_version(),
+        "executable": sys.executable,
+        "platform": platform.platform(),
+        "hostname": platform.node(),
+        "pid": os.getpid(),
+        "git": _git_state(repo_dir if repo_dir is not None else _main_script_dir()),
+    }
+
+    versions: dict[str, str | None] = {}
+    for name in packages:
+        try:
+            versions[name] = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            versions[name] = None
+    if versions:
+        info["packages"] = versions
+
+    slurm = {key: os.environ[var] for key, var in _SLURM_FIELDS.items() if os.environ.get(var)}
+    if slurm:
+        info["slurm"] = slurm
+
+    for key, var in (("rank", "RANK"), ("world_size", "WORLD_SIZE")):
+        value = os.environ.get(var)
+        if value is not None and value.isdigit():
+            info[key] = int(value)
+
+    return info
