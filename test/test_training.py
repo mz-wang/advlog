@@ -16,6 +16,7 @@
 
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -130,3 +131,19 @@ class TestTrainingLoggerStructuredData:
         data = json.loads(JSONFormatter().format(records[0]))
         assert data["extra"]["event"] == "train_step"
         assert data["extra"]["metrics"] == {"loss": 0.25}
+
+
+def test_train_step_csv_accepts_path(trainer_and_records, tmp_path):
+    trainer, _ = trainer_and_records
+    csv_path: Path = tmp_path / "metrics" / "train.csv"
+    for batch in (1, 2):
+        trainer.log_train_step(
+            epoch=1,
+            total_epochs=1,
+            batch=batch,
+            total_batches=2,
+            loss_dict={"loss": 0.5},
+            time_elapsed=0.1,
+            csv_path=csv_path,
+        )
+    assert csv_path.read_text(encoding="utf-8").splitlines() == ["epoch,batch,loss", "1,1,0.5", "1,2,0.5"]

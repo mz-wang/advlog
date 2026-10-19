@@ -19,7 +19,7 @@ import logging
 import os
 from typing import Any
 
-from advlog.utils.path import ensure_dir
+from advlog.utils.path import StrPath, ensure_dir
 
 try:
     from omegaconf import OmegaConf
@@ -200,7 +200,7 @@ class TrainingLogger:
         total_batches: int,
         loss_dict: dict[str, float],
         time_elapsed: float,
-        csv_path: str | None = None,
+        csv_path: StrPath | None = None,
         additional_metrics: dict[str, Any] | None = None,
     ):
         """Log training step information.
@@ -257,7 +257,7 @@ class TrainingLogger:
 
     def _log_to_csv(
         self,
-        csv_path: str,
+        csv_path: StrPath,
         epoch: int,
         batch: int,
         loss_dict: dict[str, float],

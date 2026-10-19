@@ -17,7 +17,7 @@
 import os
 from datetime import datetime
 
-from .path import ensure_dir
+from .path import StrPath, ensure_dir
 
 
 class LogNamingStrategy:
@@ -44,7 +44,7 @@ class LogNamingStrategy:
     def timestamped(
         name: str,
         suffix: str | None = None,
-        directory: str = "logs",
+        directory: StrPath = "logs",
         timestamp_format: str = "%Y%m%d_%H%M%S",
         extension: str = ".log",
         use_date_dir: bool = True,
@@ -88,7 +88,7 @@ class LogNamingStrategy:
     def daily(
         name: str,
         suffix: str | None = None,
-        base_directory: str = "logs",
+        base_directory: StrPath = "logs",
         date_format: str = "%Y-%m-%d",
         extension: str = ".log",
     ) -> str:
@@ -124,7 +124,7 @@ class LogNamingStrategy:
     def hourly(
         name: str,
         suffix: str | None = None,
-        base_directory: str = "logs",
+        base_directory: StrPath = "logs",
         datetime_format: str = "%Y-%m-%d/%H",
         extension: str = ".log",
     ) -> str:
@@ -160,7 +160,7 @@ class LogNamingStrategy:
     def incremental(
         name: str,
         suffix: str | None = None,
-        directory: str = "logs",
+        directory: StrPath = "logs",
         extension: str = ".log",
         max_attempts: int = 1000,
     ) -> str:
@@ -209,7 +209,7 @@ class LogNamingStrategy:
         name: str,
         session_id: str | None = None,
         suffix: str | None = None,
-        directory: str = "logs",
+        directory: StrPath = "logs",
         extension: str = ".log",
     ) -> str:
         """Generate log file name with session ID.

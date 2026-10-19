@@ -40,6 +40,7 @@ from typing import Any
 from advlog.core import LoggerManager
 from advlog.plugins import ProgressTracker
 from advlog.utils import LogNamingStrategy
+from advlog.utils.path import StrPath
 
 # Global singleton instances
 _LOGGER_MANAGER: LoggerManager | None = None
@@ -49,7 +50,7 @@ _INIT_CONFIG: dict = {}
 
 
 def initialize(
-    output_dir: str = "./logs",
+    output_dir: StrPath = "./logs",
     use_date_dir: bool = True,
     session_name: str = "app",
     suffix: str | None = None,
@@ -58,7 +59,7 @@ def initialize(
     enable_file_logging: bool = True,
     show_location: bool = False,
     file_mode: str = "a",
-    log_file_path: str | None = None,
+    log_file_path: StrPath | None = None,
     file_format: str = "text",
     max_file_size: int | None = None,
     backup_count: int = 5,
@@ -145,12 +146,12 @@ def initialize(
     log_level_int = level_map.get(log_level.upper(), logging.INFO)
 
     # Create main log file path if file logging is enabled
-    shared_file = None
+    shared_file: str | None = None
     if enable_file_logging:
         if log_file_path:
             # Use the specified log file path (for breakpoint continue)
             # This COMPLETELY overrides output_dir and session_name
-            shared_file = log_file_path
+            shared_file = os.fspath(log_file_path)
             # Ensure the directory exists
             log_dir = os.path.dirname(os.path.abspath(shared_file))
             if log_dir:

@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from advlog.handlers.file import DEFAULT_DATE_FORMAT, DEFAULT_LOG_FORMAT
+from advlog.utils.path import StrPath
 
 
 @dataclass
@@ -71,7 +72,7 @@ class LoggerConfig:
 
     # Identity & file
     name: str = "AppLogger"
-    log_file: str | None = None
+    log_file: StrPath | None = None
     log_level: str = "INFO"
     file_mode: str = "a"
     file_format: str | None = None
