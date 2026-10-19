@@ -1,3 +1,15 @@
+## v0.7.0 (2026-10-19)
+
+### BREAKING CHANGE
+
+- TrainingLogger and the torch extra are removed. Use
+log_config() for configurations and log_metrics() for train and
+evaluation steps.
+
+### Refactor
+
+- replace TrainingLogger with log_config
+
 ## v0.6.0 (2026-10-19)
 
 ### BREAKING CHANGE
