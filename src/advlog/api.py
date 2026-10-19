@@ -34,7 +34,9 @@ Usage:
 
 import logging
 import os
+import signal
 import sys
+import threading
 from collections.abc import Iterable
 from typing import Any
 
@@ -382,28 +384,68 @@ def reset():
     _INIT_CONFIG = {}
 
 
-def setup_exception_logging(logger: logging.Logger | None = None) -> None:
-    """Install a global handler to log uncaught exceptions.
+def setup_exception_logging(
+    logger: logging.Logger | None = None,
+    threads: bool = True,
+    sigterm: bool = False,
+) -> None:
+    """Log how a run ends when it ends badly: uncaught exceptions, optionally SIGTERM.
 
     Args:
         logger: Logger to use. Defaults to the managed ``advlog`` logger, so
                 the traceback goes to the console and the log file(s) set up
                 by initialize().
+        threads: Also log exceptions that end a thread (``threading.excepthook``).
+        sigterm: Log SIGTERM and exit with status 143 by raising SystemExit.
+                 SIGTERM is what Slurm sends at the time limit and on
+                 ``scancel``, and what ``kill`` and ``docker stop`` send. By
+                 default Python dies on it without running ``finally`` blocks,
+                 context managers or atexit handlers, and without a word in the
+                 log. Off by default, since installing a signal handler is the
+                 application's call; must be called from the main thread. A
+                 SIGTERM handler installed earlier is called instead of exiting.
 
     Example:
         >>> from advlog import setup_exception_logging
-        >>> setup_exception_logging()
+        >>> setup_exception_logging(sigterm=True)  # e.g. in a Slurm job
     """
     if logger is None:
         logger = get_logger("advlog")
+    log = logger
 
     def _log_uncaught(exc_type, exc_value, exc_tb):
         if issubclass(exc_type, KeyboardInterrupt):
             sys.__excepthook__(exc_type, exc_value, exc_tb)
         else:
-            logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_tb))
+            log.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_tb))
 
     sys.excepthook = _log_uncaught
+
+    if threads:
+
+        def _log_uncaught_in_thread(args: threading.ExceptHookArgs) -> None:
+            if args.exc_type is SystemExit:  # ends a thread quietly, as with the default hook
+                return
+            name = args.thread.name if args.thread is not None else "<unknown>"
+            # The exception carries its own traceback; exc_value may be None
+            log.error(
+                f"Uncaught {args.exc_type.__name__} in thread {name}",
+                exc_info=args.exc_value if args.exc_value is not None else False,
+            )
+
+        threading.excepthook = _log_uncaught_in_thread
+
+    if sigterm:
+        previous = signal.getsignal(signal.SIGTERM)
+
+        def _on_sigterm(signum, frame):
+            log.error("Received SIGTERM, shutting down", extra={"event": "terminated", "signal": "SIGTERM"})
+            if callable(previous):
+                previous(signum, frame)
+            else:
+                raise SystemExit(128 + signum)
+
+        signal.signal(signal.SIGTERM, _on_sigterm)
 
 
 # Export public API

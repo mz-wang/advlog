@@ -344,11 +344,16 @@ Records logged through `TrainingLogger` report the file and line of *your* call 
 ```python
 from advlog import setup_exception_logging
 
-# Install a sys.excepthook that logs all uncaught exceptions
+# Log uncaught exceptions, in the main thread and in other threads
 setup_exception_logging()
+
+# In a Slurm job (or anything stopped with kill / docker stop): also log SIGTERM
+setup_exception_logging(sigterm=True)
 ```
 
-The traceback goes wherever your other logs go: the console and the log file(s) configured by `initialize()`, including the `.jsonl` file (as an `ERROR` record with an `exception` field). Pass your own logger to route it elsewhere. `KeyboardInterrupt` is left to Python's default handling.
+The traceback goes wherever your other logs go: the console and the log file(s) configured by `initialize()`, including the `.jsonl` file (as an `ERROR` record with an `exception` field). Pass your own logger to route it elsewhere. `KeyboardInterrupt` is left to Python's default handling, as is `SystemExit` in a thread; `threads=False` leaves `threading.excepthook` alone.
+
+SIGTERM is what Slurm sends at the time limit and on `scancel`. By default Python dies on it at once: no `finally` blocks, no context managers, no atexit handlers, and nothing in the log. With `sigterm=True` an `ERROR` record (`extra.event` = `"terminated"`) is written and `SystemExit(143)` is raised, so cleanup code runs and the exit status is the usual one for SIGTERM. A SIGTERM handler you installed earlier is called instead of exiting. Call it from the main thread. Slurm sends SIGKILL after a grace period (`KillWait`, 30 s by default), so keep the cleanup short.
 
 ## Real-World Example
 
