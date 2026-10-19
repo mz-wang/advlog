@@ -12,12 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Run records for experiments and simulations: run info, metrics, artifacts.
+"""Run records for experiments and simulations: run info, config, metrics, artifacts.
 
 Each function writes one record whose data is attached as ``extra`` fields,
-with ``extra.event`` naming the kind of record ("run_start", "metrics",
-"artifact"), so a JSON Lines log can be filtered by event. TrainingLogger
-uses the same convention for its training-specific records.
+with ``extra.event`` naming the kind of record ("run_start", "config",
+"metrics", "artifact"), so a JSON Lines log can be filtered by event.
 """
 
 import logging
@@ -28,11 +27,23 @@ from typing import Any
 from advlog.utils.environment import collect_run_info
 from advlog.utils.path import StrPath
 
+try:
+    from omegaconf import OmegaConf
+
+    OMEGACONF_AVAILABLE = True
+except ImportError:
+    OMEGACONF_AVAILABLE = False
+
 __all__ = [
     "log_run_info",
+    "log_config",
     "log_metrics",
     "log_artifact",
 ]
+
+# Marks lines that only make sense to a human reader (separators, values already
+# carried as structured data by another record); JSON files skip them.
+_TEXT_ONLY = {"text_only": True}
 
 
 def _default_logger(logger: logging.Logger | None) -> logging.Logger:
@@ -117,6 +128,65 @@ def log_run_info(
 
     _default_logger(logger).info("\n".join(lines), extra={"event": "run_start", "run_info": info}, stacklevel=2)
     return info
+
+
+def _is_omegaconf(config: Any) -> bool:
+    return OMEGACONF_AVAILABLE and "omegaconf" in getattr(config, "__module__", "")
+
+
+def _config_to_data(config: Any) -> Any:
+    if _is_omegaconf(config):
+        try:
+            return OmegaConf.to_container(config, resolve=True)
+        except Exception:
+            # Missing values or unresolvable interpolations
+            return OmegaConf.to_container(config, resolve=False)
+    if isinstance(config, Mapping):
+        return dict(config)
+    if hasattr(config, "__dict__"):
+        return {key: value for key, value in vars(config).items() if not key.startswith("_")}
+    return str(config)
+
+
+def _log_mapping(logger: logging.Logger, data: Mapping[Any, Any], indent: int, stacklevel: int) -> None:
+    for key, value in data.items():
+        if isinstance(value, Mapping):
+            logger.info("  " * indent + f"{key}:", extra=_TEXT_ONLY, stacklevel=stacklevel)
+            _log_mapping(logger, value, indent + 1, stacklevel + 1)
+        else:
+            logger.info("  " * indent + f"{key}: {value}", extra=_TEXT_ONLY, stacklevel=stacklevel)
+
+
+def log_config(config: Any, title: str = "Configuration", logger: logging.Logger | None = None) -> None:
+    """Log the parameters of a run: a dict, an OmegaConf config or any object.
+
+    Writes one record with ``extra.event`` = "config", ``extra.title`` and the
+    configuration as plain data under ``extra.config``: OmegaConf configs are
+    resolved where possible, other objects contribute their public attributes.
+    The text log gets one line per key between a header and a footer; those
+    lines are marked ``text_only``, so a JSON file holds the single record.
+
+    Args:
+        config: dict, OmegaConf config or any object with attributes
+        title: Heading for the text log
+        logger: Logger to use. Defaults to the managed ``advlog`` logger.
+
+    Example:
+        >>> log_config({"lr": 1e-3, "model": {"depth": 18}}, title="Hyperparameters")
+    """
+    log = _default_logger(logger)
+    data = _config_to_data(config)
+
+    # stacklevel: 2 reports the caller of this function; _log_mapping sits one
+    # frame deeper per level of nesting
+    log.info(f"===== {title} =====", extra={"event": "config", "title": title, "config": data}, stacklevel=2)
+    if _is_omegaconf(config):
+        log.info(OmegaConf.to_yaml(config), extra=_TEXT_ONLY, stacklevel=2)
+    elif isinstance(data, Mapping):
+        _log_mapping(log, data, indent=0, stacklevel=3)
+    else:
+        log.info(data, extra=_TEXT_ONLY, stacklevel=2)
+    log.info("=" * (len(title) + 12), extra=_TEXT_ONLY, stacklevel=2)
 
 
 def log_metrics(

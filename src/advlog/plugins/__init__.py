@@ -15,14 +15,13 @@
 """Plugin modules for extended functionality."""
 
 from .progress import ProgressTracker, create_progress_bar
-from .run import log_artifact, log_metrics, log_run_info
-from .training import TrainingLogger
+from .run import log_artifact, log_config, log_metrics, log_run_info
 
 __all__ = [
     "ProgressTracker",
     "create_progress_bar",
-    "TrainingLogger",
     "log_run_info",
+    "log_config",
     "log_metrics",
     "log_artifact",
 ]

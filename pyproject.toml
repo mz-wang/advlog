@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "advlog-core"
 version = "0.6.0"
-description = "Advanced logging library with Rich features, progress tracking, and ML training utilities"
+description = "Advanced logging library with Rich features, progress tracking, and run records for experiments"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 authors = [
     {name = "Mengzhao Wang", email = "mengzhao_wang@foxmail.com"}
 ]
-keywords = ["logging", "rich", "progress", "training", "ml", "deep-learning"]
+keywords = ["logging", "rich", "progress", "experiments", "ml", "deep-learning"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -33,17 +33,13 @@ dependencies = [
 config = [
     "omegaconf>=2.0.0",
 ]
-# PyTorch model summary support
-torch = [
-    "torchinfo>=1.0.0",
-]
 # Distributed training support
 distributed = [
     "accelerate>=0.20.0",
 ]
 # All optional features
 all = [
-    "advlog-core[config,torch,distributed]",
+    "advlog-core[config,distributed]",
 ]
 # Development dependencies
 dev = [

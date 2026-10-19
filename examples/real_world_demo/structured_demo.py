@@ -35,7 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from advlog import TrainingLogger, bind_context, get_logger, initialize, unbind_context
+from advlog import bind_context, get_logger, initialize, log_config, log_metrics, unbind_context
 
 LOG_FILE = Path("./logs/structured_demo.log")
 JSONL_FILE = LOG_FILE.with_suffix(".jsonl")
@@ -51,7 +51,6 @@ initialize(
 )
 
 log = get_logger(__name__)
-trainer = TrainingLogger(log)
 
 
 # ── Part 1: a simulated training run ───────────────────────────────────────────
@@ -73,7 +72,7 @@ def run_training() -> None:
         "output_dir": Path("./results/run_001"),  # not JSON-native, converted to str
         "seed": 42,
     }
-    trainer.log_configuration(params, title="Run Parameters")
+    log_config(params, title="Run Parameters", logger=log)
 
     # Plain logger call with ad-hoc structured fields
     log.info("Dataset loaded", extra={"event": "data_loaded", "train_samples": 50000, "val_samples": 10000})
@@ -91,15 +90,8 @@ def run_training() -> None:
             loss = fake_loss(step)
             lr = 1e-3 * (0.5 ** (epoch - 1))
 
-            trainer.log_train_step(
-                epoch=epoch,
-                total_epochs=total_epochs,
-                batch=batch,
-                total_batches=total_batches,
-                loss_dict={"loss": loss},
-                time_elapsed=0.12,
-                additional_metrics={"lr": lr},
-            )
+            # epoch comes from the bound context, batch and phase are extra fields
+            log_metrics({"loss": loss, "lr": lr}, step=step, logger=log, phase="train", batch=batch)
 
             if math.isnan(loss):
                 log.warning(
@@ -107,7 +99,7 @@ def run_training() -> None:
                     extra={"event": "nan_loss", "epoch": epoch, "batch": batch, "step": step},
                 )
 
-        trainer.log_evaluation_results({"val_loss": fake_loss(step + 1), "val_acc": 0.6 + 0.1 * epoch}, epoch=epoch)
+        log_metrics({"val_loss": fake_loss(step + 1), "val_acc": 0.6 + 0.1 * epoch}, step=step, logger=log, phase="val")
 
     unbind_context("epoch")
 
@@ -129,6 +121,9 @@ def analyze() -> None:
     def events(name: str) -> list[dict]:
         return [r for r in records if r.get("extra", {}).get("event") == name]
 
+    def metrics(phase: str) -> list[dict]:
+        return [r for r in events("metrics") if r["extra"]["phase"] == phase]
+
     print()
     print("=" * 70)
     print(f"Read {len(records)} records back from {JSONL_FILE}")
@@ -139,19 +134,19 @@ def analyze() -> None:
 
     print("\n[2] Loss curve (no regex over message text needed):")
     print(f"  {'epoch':>5} {'batch':>5} {'loss':>8} {'lr':>10}")
-    for r in events("train_step"):
+    for r in metrics("train"):
         e = r["extra"]
         loss = e["metrics"]["loss"]
         loss_str = f"{loss:8.4f}" if loss is not None else "    null"
         print(f"  {e['epoch']:>5} {e['batch']:>5} {loss_str} {e['metrics']['lr']:>10.2e}")
 
     print("\n[3] Steps where loss was NaN (stored as null):")
-    for r in events("train_step"):
+    for r in metrics("train"):
         if r["extra"]["metrics"]["loss"] is None:
             print(f"  epoch {r['extra']['epoch']}, batch {r['extra']['batch']}  ->  message was: {r['message']}")
 
     print("\n[4] Best validation accuracy:")
-    best = max(events("evaluation"), key=lambda r: r["extra"]["metrics"]["val_acc"])
+    best = max(metrics("val"), key=lambda r: r["extra"]["metrics"]["val_acc"])
     print(f"  epoch {best['extra']['epoch']}: {best['extra']['metrics']}")
 
     print("\n[5] Everything at WARNING or above:")
@@ -161,7 +156,7 @@ def analyze() -> None:
             if "exception" in r:
                 print(f"      exception: {r['exception'].splitlines()[-1]}")
 
-    print("\n[6] Records per logging call site (TrainingLogger reports the caller, not itself):")
+    print("\n[6] Records per logging call site (log_config and log_metrics report the caller, not themselves):")
     sites: dict[str, int] = {}
     for r in records:
         site = f"{r['module']}.{r['function']}"
@@ -170,7 +165,9 @@ def analyze() -> None:
         print(f"  {site}: {count}")
 
     print("\n[7] One raw line from the file, for reference:")
-    print("  " + next(line for line in JSONL_FILE.read_text(encoding="utf-8").splitlines() if "train_step" in line))
+    print(
+        "  " + next(line for line in JSONL_FILE.read_text(encoding="utf-8").splitlines() if '"phase": "train"' in line)
+    )
 
     print()
     print(f"Text log : {LOG_FILE.resolve()}")
