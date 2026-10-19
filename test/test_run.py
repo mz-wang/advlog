@@ -21,7 +21,7 @@ import subprocess
 
 import pytest
 
-from advlog import collect_run_info, initialize, log_artifact, log_metrics, log_run_info, reset
+from advlog import collect_run_info, initialize, log_artifact, log_config, log_metrics, log_run_info, reset
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
@@ -173,6 +173,64 @@ class TestLogRunInfo:
         assert record["logger"] == "advlog"
         assert record["extra"]["event"] == "run_start"
         assert record["extra"]["run_info"]["git"] is None
+
+
+class TestLogConfig:
+    def test_one_structured_record(self, logger_and_records):
+        logger, records = logger_and_records
+        config = {"lr": 0.001, "model": {"name": "resnet", "depth": 50}}
+        log_config(config, title="Run Config", logger=logger)
+
+        structured = [r for r in records if not getattr(r, "text_only", False)]
+        assert len(structured) == 1
+        assert (structured[0].event, structured[0].title, structured[0].config) == ("config", "Run Config", config)
+        # header, lr, model, name, depth, footer
+        assert [r.getMessage() for r in records[1:-1]] == ["lr: 0.001", "model:", "  name: resnet", "  depth: 50"]
+        assert len(records) == 6
+
+    def test_plain_object(self, logger_and_records):
+        logger, records = logger_and_records
+
+        class Config:
+            def __init__(self):
+                self.lr = 0.01
+                self._private = "hidden"
+
+        log_config(Config(), logger=logger)
+        assert records[0].config == {"lr": 0.01}
+        assert [r.getMessage() for r in records[1:-1]] == ["lr: 0.01"]
+
+    def test_value_without_attributes(self, logger_and_records):
+        logger, records = logger_and_records
+        log_config("lr=0.01", logger=logger)
+        assert records[0].config == "lr=0.01"
+        assert records[1].getMessage() == "lr=0.01"
+
+    def test_omegaconf(self, logger_and_records):
+        omegaconf = pytest.importorskip("omegaconf")
+        logger, records = logger_and_records
+        cfg = omegaconf.OmegaConf.create({"lr": 0.01, "scaled": "${lr}"})
+        log_config(cfg, logger=logger)
+
+        assert records[0].config == {"lr": 0.01, "scaled": 0.01}  # resolved
+        assert records[1].getMessage() == "lr: 0.01\nscaled: ${lr}\n"  # YAML, as written
+        assert records[1].text_only is True
+
+    def test_records_report_callers_location(self, logger_and_records):
+        logger, records = logger_and_records
+        log_config({"lr": 0.001, "model": {"depth": {"blocks": 4}}}, logger=logger)
+
+        # Every line, including nested ones, points at this test rather than run.py
+        assert {(r.filename, r.funcName) for r in records} == {("test_run.py", "test_records_report_callers_location")}
+
+    def test_json_output_through_default_logger(self, tmp_path):
+        initialize(log_file_path=tmp_path / "run.jsonl", file_format="json")
+        log_config({"lr": 0.001, "model": {"depth": 50}})
+        reset()
+
+        lines = (tmp_path / "run.jsonl").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0])["extra"]["config"] == {"lr": 0.001, "model": {"depth": 50}}
 
 
 class TestLogMetrics:

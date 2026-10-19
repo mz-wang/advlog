@@ -18,7 +18,7 @@ This package provides a modular, feature-rich logging system with:
 - Colored console output (via Rich)
 - File logging with optional rotation
 - Progress bar integration
-- Training utilities for ML/DL
+- Run records for experiments: run info, config, metrics, artifacts
 - Environment auto-detection
 - Flexible configuration
 
@@ -42,22 +42,16 @@ Quick Start:
         ...         # Do work
         ...         progress.update(task, advance=1)
 
-    Training logger:
-        >>> from advlog import TrainingLogger
-        >>> import logging
-        >>> logger = logging.getLogger(__name__)
-        >>> trainer = TrainingLogger(logger)
-        >>> trainer.log_train_step(
-        ...     epoch=1, total_epochs=10,
-        ...     batch=1, total_batches=100,
-        ...     loss_dict={"loss": 0.5},
-        ...     time_elapsed=1.2
-        ... )
+    Run records:
+        >>> from advlog import log_config, log_metrics, log_run_info
+        >>> log_run_info()
+        >>> log_config({"lr": 1e-3, "epochs": 10})
+        >>> log_metrics({"loss": 0.5}, step=1)
 
 Modules:
     core: Core logging functionality
     handlers: File and console handlers
-    plugins: Progress tracking and training utilities
+    plugins: Progress tracking and run records
     utils: Environment detection and helper utilities
     api: Global logging management (initialize, get_logger, get_progress)
 """
@@ -87,9 +81,9 @@ from .handlers import (
 try:
     from .plugins import (
         ProgressTracker,
-        TrainingLogger,
         create_progress_bar,
         log_artifact,
+        log_config,
         log_metrics,
         log_run_info,
     )
@@ -137,8 +131,8 @@ __all__ = [
     # Plugins
     "ProgressTracker",
     "create_progress_bar",
-    "TrainingLogger",
     "log_run_info",
+    "log_config",
     "log_metrics",
     "log_artifact",
     # Utils

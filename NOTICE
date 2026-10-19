@@ -23,12 +23,7 @@ compatibility and licensing:
    - Copyright (c) Facebook, Inc. and its affiliates.
    - Source: https://github.com/omry/omegaconf
 
-3. torchinfo (Optional)
-   - License: MIT
-   - Copyright (c) 2020 Tyler Yep
-   - Source: https://github.com/TylerYep/torchinfo
-
-4. Accelerate (Optional)
+3. Accelerate (Optional)
    - License: Apache-2.0
    - Copyright 2021- Hugging Face Inc.
    - Source: https://github.com/huggingface/accelerate

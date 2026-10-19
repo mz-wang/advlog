@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.6.0-brightgreen)](CHANGELOG.md)
 
-A Python logging library with colored terminal output, file management, progress tracking, and ML training utilities, built on top of [Rich](https://github.com/Textualize/rich).
+A Python logging library with colored terminal output, file management, progress tracking, and run records for experiments, built on top of [Rich](https://github.com/Textualize/rich).
 
 > **Personal project notice:** This package was written for personal development use. Update frequency and feature scope may be limited. Contributions and suggestions are welcome.
 
@@ -16,8 +16,7 @@ A Python logging library with colored terminal output, file management, progress
 - **Structured Output** — Optional JSON Lines file with your own fields (`extra=`, bound context) for parsing and querying
 - **Progress Tracking** — Integrated progress bars via `ProgressTracker`
 - **Multi-Module Coordination** — `LoggerManager` for consistent logging across modules
-- **ML/Training Utilities** — `TrainingLogger` plugin for experiment logging
-- **Run Records** — Git commit, host and command line of each run, per-step metrics and output files as queryable records
+- **Run Records** — Git commit, host and command line of each run, its configuration, per-step metrics and output files as queryable records
 - **Smart File Naming** — Timestamped, daily, and incremental log file naming
 
 ## Installation
@@ -317,39 +316,17 @@ with ProgressTracker() as progress:
         progress.update(process, advance=1)
 ```
 
-## ML Training Utilities
-
-```python
-from advlog import TrainingLogger, get_logger
-
-logger = get_logger(__name__)
-trainer = TrainingLogger(logger)
-
-trainer.log_train_step(
-    epoch=1,
-    total_epochs=10,
-    batch=100,
-    total_batches=1000,
-    loss_dict={"loss": 0.4231, "accuracy": 0.872},
-    time_elapsed=45.2,
-    additional_metrics={"lr": 1e-3},
-)
-```
-
-`log_configuration`, `log_train_step`, and `log_evaluation_results` attach their data as `extra` fields, so with `file_format="json"` or `"both"` each one becomes a queryable record (`extra.event` is `"config"`, `"train_step"`, or `"evaluation"`). Their separator and per-key lines are marked `text_only`, so the `.jsonl` file gets one record per call rather than one per printed line.
-
-Records logged through `TrainingLogger` report the file and line of *your* call (visible with `show_location=True` and in the JSON `module` / `function` / `line` fields), not a location inside the helper.
-
 ## Run Records
 
-For simulations and experiments in general, three functions each write one record, tagged with `extra.event` like the `TrainingLogger` records:
+For simulations, training runs and experiments in general, four functions each write one record, tagged with `extra.event`:
 
 ```python
-from advlog import initialize, log_artifact, log_metrics, log_run_info
+from advlog import initialize, log_artifact, log_config, log_metrics, log_run_info
 
 initialize(session_name="sim", file_format="both")
 
 info = log_run_info(packages=["numpy", "scipy"])          # once, at the start
+log_config({"tol": 1e-10, "grid": {"nx": 128, "ny": 128}})  # dict, OmegaConf config or any object
 for it in range(n_iter):
     ...
     log_metrics({"residual": res, "energy": e}, step=it)  # extra fields: log_metrics(..., phase="relax")
@@ -359,12 +336,15 @@ log_artifact("field", "out/field.npy")                    # each output file
 | Function | `extra.event` | Stored under `extra` | Text log |
 |---|---|---|---|
 | `log_run_info()` | `"run_start"` | `run_info`: `argv`, `cwd`, `git` (`commit`, `branch`, `dirty`), `hostname`, `pid`, `python`, `executable`, `platform`, plus `packages`, `slurm` and `rank` / `world_size` when present | `Run started: train.py --lr 0.1`, then git, host and package lines |
+| `log_config(config, title=...)` | `"config"` | `title`, `config` (OmegaConf configs resolved, objects as their public attributes) | `===== Configuration =====`, then one `key: value` line per entry |
 | `log_metrics(metrics, step=None)` | `"metrics"` | `step`, `metrics`, your keyword fields | `step 120: residual=3.2e-07, energy=-1.25` |
 | `log_artifact(name, path)` | `"artifact"` | `artifact` (the name), absolute `path`, `exists`, `size` | `Artifact field: /abs/out/field.npy (8.0 MB)`; a missing path is a `WARNING` |
 
 - `git` describes the repository containing the running script (or `repo_dir=`). `dirty` is true when tracked files have uncommitted changes, which is the case where the commit alone does not reproduce the run. Untracked files are ignored, since results written into the repository would otherwise mark every run dirty. `git` is `null` outside a repository or without git.
-- All three log through the managed `advlog` logger unless you pass `logger=`. `collect_run_info()` returns the run info without logging it, e.g. to `bind_context(git_sha=info["git"]["commit"])`.
-- For parameters, `TrainingLogger(log).log_configuration(params)` writes one `"config"` record; it is not specific to training.
+- All four log through the managed `advlog` logger unless you pass `logger=`. `collect_run_info()` returns the run info without logging it, e.g. to `bind_context(git_sha=info["git"]["commit"])`.
+- The per-key lines and separators of `log_config` are marked `text_only`, so the `.jsonl` file gets the single `"config"` record rather than one record per printed line.
+- For a training loop, tag records with keyword fields and bound context: `log_metrics({"loss": loss, "lr": lr}, step=step, phase="train")` per batch, `log_metrics(val_metrics, step=step, phase="val")` per epoch, after `bind_context(epoch=epoch)`.
+- The records report the file and line of *your* call (visible with `show_location=True` and in the JSON `module` / `function` / `line` fields), not a location inside advlog.
 
 ## Exception Logging
 
@@ -402,13 +382,11 @@ python -m examples.real_world_demo.run_records_demo  # run info, metrics and art
 
 | Extra tag | Package | Feature |
 |---|---|---|
-| `config` | `omegaconf` | Advanced config file parsing |
-| `torch` | `torchinfo` | Model structure visualization |
+| `config` | `omegaconf` | OmegaConf configs in `log_config()`, logged as YAML and stored resolved |
 | `distributed` | `accelerate` | Main-process detection from accelerate's own state. Not needed for `main_process_only`, which also reads `RANK` |
 
 ```bash
 pip install "advlog-core[config]"
-pip install "advlog-core[torch]"
 pip install "advlog-core[distributed]"
 ```
 
