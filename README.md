@@ -75,6 +75,32 @@ Things worth knowing:
 - `use_color=False` turns color off for everything drawn on the shared console, progress bars included.
 - `get_logger(name, log_level="ERROR")` sets the level even if that logger already exists.
 
+### Libraries: log through the standard library
+
+`get_logger()` is for application code: it gives the logger its own handlers and stops it from propagating, so the host program's handlers and pytest's `caplog` never see its records. A package meant to be imported by others should log the standard way and leave output to the application:
+
+```python
+# mylib/registry.py
+import logging
+
+log = logging.getLogger(__name__)
+log.info("registered %d samples", n)
+```
+
+The application then routes those records through advlog with `capture`:
+
+```python
+from advlog import initialize
+
+initialize(output_dir="./logs", session_name="sim", capture=["mylib"])
+```
+
+- Every logger under the captured name (`mylib.registry`, `mylib.io`, ...) goes to the advlog console and log file(s), with bound context fields attached.
+- Records keep propagating, so handlers the host installed on the root logger and pytest's `caplog` still receive them. If the host also has a console handler on the root logger (e.g. from `logging.basicConfig()`), those lines appear twice, and that handler now also gets the package's `INFO`/`DEBUG` records, because propagation checks handler levels, not the root logger's level. Capture the package or configure a root console handler, not both.
+- The captured logger's level is lowered to the lowest level the advlog handlers accept (`DEBUG` with file logging) and restored by `reset()` or by a later `initialize()` that no longer lists it.
+- `capture=["root"]` collects every library, including third-party `DEBUG` chatter in the log file; prefer naming packages.
+- `LoggerManager` offers the same through `LoggerManager(capture=...)`, `capture(name)` and `release(name)`.
+
 ### Per-logger configuration with `LoggerConfig`
 
 ```python
@@ -104,7 +130,7 @@ db_logger.debug("Executing query: SELECT ...")
 | `name`, `log_level`, `propagate`, `console_output`, `show_location` | The logger itself |
 | `log_file`, `file_mode`, `file_format`, `max_file_size`, `backup_count`, `log_format`, `date_format`, `encoding` | The logger's own file (`log_file`). `file_format`, `max_file_size` and `backup_count` fall back to the manager's values when left as `None` |
 | `use_color`, `enable_rich_tracebacks` | The logger's own console handler, i.e. only with `LoggerManager(shared_console=False)` |
-| `use_accelerate` | Drops this logger's records on non-main processes of a Hugging Face `accelerate` run, once `Accelerator()` has been created |
+| `use_accelerate` | Drops this logger's records on non-main processes of a distributed run (see [Distributed and parallel runs](#distributed-and-parallel-runs)). `initialize(main_process_only=True)` does the same for everything |
 
 ### Register a group of loggers at once
 
@@ -198,7 +224,13 @@ The `.jsonl` file holds one JSON object per line. Anything passed via `extra=` i
 {"timestamp": "2026-03-06T14:30:22.123456+08:00", "level": "INFO", "logger": "__main__", "message": "Run started", "module": "train", "function": "<module>", "line": 6, "extra": {"lr": 0.001, "batch_size": 32}}
 ```
 
-Values JSON cannot represent (paths, sets, NumPy arrays, tensors, arbitrary objects) are converted rather than dropped, and `NaN`/`Infinity` are written as `null` so every line stays valid JSON. `file_format` is also accepted by `LoggerManager`, `LoggerConfig`, and `create_logger_group`; `create_file_handlers()` builds the handlers directly.
+Values JSON cannot represent (paths, sets, NumPy arrays, tensors, arbitrary objects) are converted rather than dropped, and `NaN`/`Infinity` are written as `null` so every line stays valid JSON. Arrays and tensors with more than 1,000 elements are written as a summary instead of in full, so logging a field array cannot put megabytes into one line:
+
+```json
+"extra": {"field": {"_type": "array_summary", "shape": [1024, 1024], "dtype": "complex64", "size": 1048576}}
+```
+
+Use `JSONFormatter(max_array_size=...)` on your own handler to change the limit (`None` writes every array in full). `file_format` is also accepted by `LoggerManager`, `LoggerConfig`, and `create_logger_group`; `create_file_handlers()` builds the handlers directly.
 
 ```python
 import pandas as pd
@@ -232,6 +264,26 @@ clear_context()           # remove all
 ```
 
 An explicit `extra=` on a call wins over a bound field of the same name. Bound fields are also available to custom text formats, e.g. `LoggerConfig(log_format="%(asctime)s %(run_id)s %(message)s")`. Names of built-in record attributes (`message`, `name`, `levelname`, ...) are rejected.
+
+### Distributed and parallel runs
+
+With torchrun, `accelerate launch` or DeepSpeed every process runs your script. To have only rank 0 write to the console and log files:
+
+```python
+initialize(session_name="train", main_process_only=True)
+```
+
+The rank comes from accelerate once `Accelerator()` / `PartialState()` exists, and otherwise from the `RANK` environment variable (or `LOCAL_RANK` if only that is set), so records are filtered from the first line on. Other ranks create no log file.
+
+Processes started together would otherwise race for the same file: the auto-generated name has one-second resolution. So when `initialize()` picks the name itself, it appends the Slurm array task and the rank of a multi-process run:
+
+| Environment | Log file |
+|---|---|
+| plain run | `20260306_143022_train.log` |
+| Slurm array task (`SLURM_ARRAY_TASK_ID=3`) | `20260306_143022_train_task3.log` |
+| rank 1 of 4 (`RANK=1`, `WORLD_SIZE=4`) | `20260306_143022_train_rank1.log` |
+
+An explicit `log_file_path` is used exactly as given. For other parallel launches (e.g. a sweep script starting several processes), pass a distinct `suffix` or `log_file_path` per process.
 
 ### Smart log file naming
 
@@ -319,7 +371,7 @@ python -m examples.real_world_demo.structured_demo   # JSON Lines output and que
 |---|---|---|
 | `config` | `omegaconf` | Advanced config file parsing |
 | `torch` | `torchinfo` | Model structure visualization |
-| `distributed` | `accelerate` | Main-process-only logging in multi-GPU runs (`LoggerConfig(use_accelerate=True)`) |
+| `distributed` | `accelerate` | Main-process detection from accelerate's own state. Not needed for `main_process_only`, which also reads `RANK` |
 
 ```bash
 pip install "advlog-core[config]"

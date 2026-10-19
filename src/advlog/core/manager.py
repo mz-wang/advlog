@@ -17,6 +17,7 @@
 import logging
 import os
 import threading
+from collections.abc import Iterable
 from typing import Any
 
 from advlog.core.config import LoggerConfig
@@ -85,6 +86,8 @@ class LoggerManager:
         max_file_size: int | None = None,
         backup_count: int = 5,
         context: dict[str, Any] | None = None,
+        capture: str | Iterable[str] = (),
+        main_process_only: bool = False,
     ):
         """Initialize the logger manager.
 
@@ -111,6 +114,12 @@ class LoggerManager:
             backup_count: Number of rotated files to keep
             context: Fields attached to every record (e.g. run id). None
                      keeps the context already bound; see bind_context().
+            capture: Names of standard library loggers (usually top-level
+                     package names) whose records, and their children's,
+                     go to the shared console and file. See capture().
+            main_process_only: Drop records on every process but rank 0 of a
+                     distributed run (torchrun, accelerate, DeepSpeed). Applies
+                     to every handler the manager creates; see is_main_process().
         """
         # Initialize internal storage ONLY ONCE
         if not hasattr(self, "_internal_init"):
@@ -120,6 +129,9 @@ class LoggerManager:
             self._shared_file_handlers: list[logging.Handler] = []
             self._console: Console | None = None
             self._context_filter = ContextFilter()
+            self._main_process_filter = MainProcessFilter()
+            # Captured logger name -> its level before capture, restored on release
+            self._captured: dict[str, int] = {}
             self._internal_init = True
 
         if file_format not in FILE_FORMATS:
@@ -144,6 +156,7 @@ class LoggerManager:
         self.file_format = file_format
         self.max_file_size = max_file_size
         self.backup_count = backup_count
+        self.main_process_only = main_process_only
 
         # The shared console has a single color setting, used by every
         # handler (and progress bar) that draws on it
@@ -160,6 +173,16 @@ class LoggerManager:
             self._init_shared_file()
         else:
             self._shared_file_handlers = []
+
+        # Captured loggers are moved to the new handlers (and released if no
+        # longer listed) before _refresh_loggers closes the old files
+        names = [logging.getLogger(n).name for n in ([capture] if isinstance(capture, str) else capture)]
+        stale = [old_console, *old_files]
+        for name in list(self._captured):
+            if name not in names:
+                self._release(name, stale)
+        for name in names:
+            self._capture(name, stale)
 
         # If already initialized previously, we need to refresh all existing loggers
         if hasattr(self, "_initialized") and self._initialized:
@@ -203,26 +226,118 @@ class LoggerManager:
         if RICH_AVAILABLE:
             self._console = get_shared_console()
 
-        self._console_handler = create_console_handler(
-            use_color=self.use_color,
-            use_rich=RICH_AVAILABLE,
-            log_level=self.console_log_level,
-            show_location=self.show_location,
-            console=self._console,
+        self._console_handler = self._own(
+            create_console_handler(
+                use_color=self.use_color,
+                use_rich=RICH_AVAILABLE,
+                log_level=self.console_log_level,
+                show_location=self.show_location,
+                console=self._console,
+            )
         )
 
     def _init_shared_file(self):
         """Initialize shared file handler(s)."""
         if self.shared_file:
-            self._shared_file_handlers = create_file_handlers(
-                log_file=self.shared_file,
-                file_format=self.file_format,
-                mode=self.file_mode,
-                max_file_size=self.max_file_size,
-                backup_count=self.backup_count,
-                log_level=self.file_log_level,
-                show_location=self.show_location,
-            )
+            self._shared_file_handlers = [
+                self._own(handler)
+                for handler in create_file_handlers(
+                    log_file=self.shared_file,
+                    file_format=self.file_format,
+                    mode=self.file_mode,
+                    max_file_size=self.max_file_size,
+                    backup_count=self.backup_count,
+                    log_level=self.file_log_level,
+                    show_location=self.show_location,
+                )
+            ]
+
+    def _own(self, handler: logging.Handler) -> logging.Handler:
+        """Add the manager's filters to a handler it creates.
+
+        The context filter also sits on each managed logger, but a logger's
+        filters only see records logged on that very logger. Records that
+        propagate up from child loggers (the captured-package case) are seen
+        by the handlers alone, so the handlers carry the filter too. The
+        same goes for main-process gating.
+
+        Args:
+            handler: Handler created by this manager
+
+        Returns:
+            The same handler
+        """
+        handler.addFilter(self._context_filter)
+        if self.main_process_only:
+            handler.addFilter(self._main_process_filter)
+        return handler
+
+    def capture(self, name: str) -> logging.Logger:
+        """Send a standard library logger's records to the shared console and file.
+
+        Meant for packages that log through ``logging.getLogger(__name__)``
+        rather than through advlog: capturing the package name routes the
+        records of all its modules here. Unlike register_logger(), the logger
+        keeps its handlers and keeps propagating, so the host's own handlers
+        (and pytest's ``caplog``) still receive the records. Its level is
+        lowered to the lowest level the shared handlers accept, and restored
+        by release().
+
+        Args:
+            name: Logger name, usually a top-level package ("mylib").
+                  "" or "root" captures the root logger, i.e. every library.
+
+        Returns:
+            The captured logger
+
+        Example:
+            manager.capture("mylib")  # mylib.io, mylib.core, ... are all captured
+        """
+        return self._capture(name)
+
+    def release(self, name: str) -> None:
+        """Undo capture(): detach the shared handlers and restore the level.
+
+        Args:
+            name: Logger name passed to capture() (unknown names are ignored)
+        """
+        self._release(logging.getLogger(name).name)
+
+    def get_captured(self) -> list[str]:
+        """Get the names of the captured loggers.
+
+        Returns:
+            Logger names ("root" for the root logger)
+        """
+        return list(self._captured)
+
+    def _capture(self, name: str, stale: Iterable[logging.Handler | None] = ()) -> logging.Logger:
+        """Attach the current shared handlers to a logger, replacing stale ones."""
+        logger = logging.getLogger(name)
+        for handler in stale:
+            if handler is not None and handler in logger.handlers:
+                logger.removeHandler(handler)
+
+        shared = [h for h in (self._console_handler, *self._shared_file_handlers) if h is not None]
+        for handler in shared:
+            if handler not in logger.handlers:
+                logger.addHandler(handler)
+
+        if logger.name not in self._captured:
+            self._captured[logger.name] = logger.level
+        if shared:
+            logger.setLevel(min(h.level for h in shared))
+        return logger
+
+    def _release(self, name: str, stale: Iterable[logging.Handler | None] = ()) -> None:
+        """Detach shared (current and stale) handlers from a captured logger."""
+        if name not in self._captured:
+            return
+        logger = logging.getLogger(name)
+        for handler in (self._console_handler, *self._shared_file_handlers, *stale):
+            if handler is not None and handler in logger.handlers:
+                logger.removeHandler(handler)
+        logger.setLevel(self._captured.pop(name))
 
     def bind_context(self, **fields: Any) -> None:
         """Attach fields to every record of every managed logger.
@@ -363,7 +478,7 @@ class LoggerManager:
                 enable_rich_tracebacks=config.enable_rich_tracebacks if config is not None else True,
                 console=console,
             )
-            logger.addHandler(console_handler)
+            logger.addHandler(self._own(console_handler))
 
         # Add file handler based on strategy
         if file_strategy == "separate" and log_file:
@@ -390,7 +505,7 @@ class LoggerManager:
                 **file_options,
             )
             for file_handler in file_handlers:
-                logger.addHandler(file_handler)
+                logger.addHandler(self._own(file_handler))
         elif file_strategy == "merged":
             for file_handler in self._shared_file_handlers:
                 logger.addHandler(file_handler)
@@ -461,6 +576,9 @@ class LoggerManager:
 
     def shutdown(self):
         """Shutdown all loggers and close handlers."""
+        for name in list(self._captured):
+            self._release(name)
+
         for logger in self.loggers.values():
             for handler in logger.handlers[:]:
                 logger.removeHandler(handler)

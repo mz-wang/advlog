@@ -35,11 +35,13 @@ Usage:
 import logging
 import os
 import sys
+from collections.abc import Iterable
 from typing import Any
 
 from advlog.core import LoggerManager
 from advlog.plugins import ProgressTracker
 from advlog.utils import LogNamingStrategy
+from advlog.utils.environment import process_tag
 from advlog.utils.path import StrPath
 
 # Global singleton instances
@@ -64,6 +66,8 @@ def initialize(
     max_file_size: int | None = None,
     backup_count: int = 5,
     context: dict[str, Any] | None = None,
+    capture: str | Iterable[str] = (),
+    main_process_only: bool = False,
 ) -> LoggerManager:
     """
     Initialize the global logging system.
@@ -76,6 +80,8 @@ def initialize(
         use_date_dir: Whether to create a subdirectory with the current date (YYYY-MM-DD).
         session_name: Name prefix for log files. Ignored if log_file_path is provided.
         suffix: Optional suffix to append to the log filename. Ignored if log_file_path is provided.
+                In a Slurm array job or a distributed run, ``task<N>`` / ``rank<N>`` is
+                appended as well, so processes started in the same second get separate files.
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         use_color: Enable colored console output
         enable_file_logging: Enable file logging. Passing False on a later call
@@ -99,6 +105,16 @@ def initialize(
         context: Fields attached to every record, e.g. ``{"run_id": "exp-42"}``. They
                  behave like ``extra=`` passed on each call. None keeps the context
                  already bound; use bind_context() to change it later.
+        capture: Packages that log through the standard library
+                 (``logging.getLogger(__name__)``) whose records should go to the
+                 same console and files, e.g. ``["mylib", "otherlib"]``. Child loggers
+                 (``mylib.io``, ...) are included and records keep propagating, so the
+                 packages' own handlers and pytest's ``caplog`` are unaffected. "root"
+                 captures every library. A later call replaces the list.
+        main_process_only: In a distributed run (torchrun, ``accelerate launch``,
+                 DeepSpeed), drop records on every process but rank 0, so one
+                 process writes the console and files. Rank comes from accelerate once
+                 initialized, else from the ``RANK`` / ``LOCAL_RANK`` environment variables.
 
     Returns:
         LoggerManager instance
@@ -132,6 +148,8 @@ def initialize(
         ...     backup_count=3,
         ...     context={"run_id": "exp-42"},
         ... )
+        >>> # Also collect the records of libraries that use logging.getLogger(__name__)
+        >>> manager = initialize(session_name="reconstruction", capture=["sim4pi"])
     """
     global _LOGGER_MANAGER, _INITIALIZED, _INIT_CONFIG
 
@@ -160,10 +178,14 @@ def initialize(
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
 
-            # Auto-generate filename with timestamp
-            # Pass directory and suffix to the naming strategy
+            # Auto-generate filename with timestamp. Processes started together
+            # (Slurm array tasks, ranks) get a tag so they do not share one file.
+            tag = process_tag()
             shared_file = LogNamingStrategy.timestamped(
-                name=session_name, suffix=suffix, directory=output_dir, use_date_dir=use_date_dir
+                name=session_name,
+                suffix="_".join(part for part in (suffix, tag) if part) or None,
+                directory=output_dir,
+                use_date_dir=use_date_dir,
             )
             # Ensure the date directory exists
             os.makedirs(os.path.dirname(shared_file), exist_ok=True)
@@ -181,6 +203,8 @@ def initialize(
         max_file_size=max_file_size,
         backup_count=backup_count,
         context=context,
+        capture=capture,
+        main_process_only=main_process_only,
     )
 
     # Store configuration for later reference
@@ -197,6 +221,8 @@ def initialize(
         "file_format": file_format,
         "max_file_size": max_file_size,
         "backup_count": backup_count,
+        "capture": capture,
+        "main_process_only": main_process_only,
     }
 
     _INITIALIZED = True
